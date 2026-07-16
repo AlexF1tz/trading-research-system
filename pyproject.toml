@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "equity-research-system"
+version = "0.1.0"
+description = "Point-in-time US-equity market and catalyst research pipeline"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary research project" }
+dependencies = []
+
+[project.scripts]
+market-data-sample = "equity_research.market_data.sample:main"
+catalyst-sample = "equity_research.catalyst_intelligence.sample:main"
+retail-attention-sample = "equity_research.retail_attention.sample:main"
+quant-modelling-sample = "equity_research.modelling.sample:main"
+model-validation-sample = "equity_research.validation.sample:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

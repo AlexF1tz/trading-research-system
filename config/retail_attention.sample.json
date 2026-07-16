@@ -1,0 +1,22 @@
+{
+  "provider": "synthetic_fixture",
+  "fail_on_quality_error": true,
+  "scoring": {
+    "as_of": "2026-07-15T14:00:00Z",
+    "interval_minutes": 15,
+    "baseline_intervals": 8,
+    "minimum_complete_baseline_intervals": 4,
+    "minimum_metric_coverage": 0.5,
+    "duplicate_similarity_threshold": 0.82,
+    "coordination_lookback_intervals": 4,
+    "crowded_mention_count": 6,
+    "crowded_baseline_score": 85.0,
+    "expanding_baseline_score": 65.0,
+    "collapsing_previous_count": 4,
+    "collapsing_ratio": 0.5,
+    "high_engagement_interactions": 25,
+    "large_observed_move_pct": 10.0,
+    "late_discovery_minutes": 30,
+    "maximum_supporting_links": 10
+  }
+}

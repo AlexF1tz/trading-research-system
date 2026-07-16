@@ -2,6 +2,8 @@
 
 This is the Stage 0 logical contract. Physical Arrow/Parquet types and validation models will be fixed in Stage 1. All timestamps are UTC unless explicitly described.
 
+The implemented standard-library market-data slice refines this contract in `src/equity_research/market_data/contracts.py`; see [MARKET_DATA_PIPELINE.md](MARKET_DATA_PIPELINE.md) for physical semantics and current limitations. Parquet remains a later storage adapter rather than an installed dependency.
+
 ## Common provenance fields
 
 | Field | Meaning |
@@ -55,7 +57,7 @@ Stores security, halt start, resumption time, reason/code, source, first-seen ti
 
 ## `source_document`
 
-Stores a filing, issuer release, or licensed news/social object: document/event ID, issuer/security links, form/type, headline/title, canonical URL, published/first-seen/available times, content hash, language, source reliability, storage mode (`metadata`, `extract`, or `full_text`), and parsing status.
+Stores a filing, issuer release, exchange/regulator announcement, or licensed secondary object: document/event ID, issuer/security links, form/type, headline/title, canonical URL, `published_at`, `first_public_at`, `first_seen_at`, `ingested_at`, conservative `available_at`, source-timestamp verification, source kind, content hash, language, storage mode (`metadata`, `extract`, or `full_text`), and parsing status. Full text is optional when storage rights do not permit it.
 
 ## `catalyst_event`
 
@@ -70,9 +72,38 @@ Stores a filing, issuer release, or licensed news/social object: document/event 
 | `evidence` | Field/span/rule references allowed by source licence |
 | `available_at` | Maximum availability needed to know this classification |
 
+The implemented catalyst slice additionally records source tier, verification status, direction, related categories, novelty/materiality heuristic scores, numerical details, dilution risk, expected catalyst date, bull/failure cases, stale/repeated/promotional flags, and an immutable `duplicate_of_event_id`.
+
 ## `attention_observation`
 
-Aggregated by source, security, and fixed window. Stores mention count, prior-window count, velocity, source breadth, unique-author count only when permitted, aggregate sentiment, collection coverage, availability, and quality flags. It does not require user-level text or identities.
+The implemented retail-attention slice refines this into source declarations, normalized mentions, and ticker signals.
+
+### `attention_source_descriptor`
+
+Stores source label, approved access method, authorization confirmation, terms URL/review time, enforced rate-limit policy, collection coverage interval, text-analysis permission, content-storage class, author-metric permission, and a coverage note. A missing or unconfirmed declaration is a hard error.
+
+### `attention_mention`
+
+| Field | Meaning |
+| --- | --- |
+| `mention_id`, `source_record_id` | Internal and source-native immutable identifiers |
+| `security_id`, `ticker` | Stable identity plus effective display label |
+| `source`, `source_url` | Declared platform/source and supporting link |
+| `published_at`, `first_seen_at`, `ingested_at`, `available_at` | UTC point-in-time provenance |
+| `content_hash` | SHA-256 of supplied analysis text or source content fingerprint |
+| `text` | Nullable and permitted only under declared excerpt/full-text rights |
+| `author_key` | Nullable source-scoped pseudonymous identity key |
+| `is_repost`, `repost_of_source_record_id` | Nullable origin relationship |
+| `outbound_urls`, `linked_catalyst_urls` | Preserved links, not confirmation by themselves |
+| `engagement_snapshots` | Timestamped likes/replies/reposts/views where permitted |
+| `account_quality_score`, `account_quality_basis` | Optional provider-normalized 0–1 indicator and mandatory basis |
+| `affiliate_or_paid_promotion` | Nullable explicit source/collector flag |
+
+### `attention_signal`
+
+One row per monitored security and `as_of`, including zero-mention securities. It stores interval counts, raw/current/previous counts, complete-baseline count and mean, adjusted mention score, velocity, acceleration, unique-author and independent-author metrics, engagement velocity, sentiment, account-quality coverage, original/repost ratio, duplicate-language ratio, promotional score, source counts/concentration/diversity, first-observed time, primary catalyst links, supporting links, stage, flags, completeness warnings, and scoring version.
+
+The adjusted score is null when collection coverage cannot support a comparable baseline. `quiet` and a measured zero are distinct from `insufficient_data`.
 
 ## `feature_vector`
 
@@ -96,7 +127,16 @@ The full contract is in [PREDICTION_SCHEMA.md](PREDICTION_SCHEMA.md). It is appe
 | `fill_quality` | Quote/bar fidelity and estimated-cost flags |
 | `path_hash` | Hash of inputs used to create the label |
 
+## `model_training_row`
+
+The implemented modelling slice consumes one matured, immutable row per historical prediction opportunity. It stores stable observation/event/security IDs, ticker as of prediction, UTC prediction/feature/outcome availability timestamps, source URL, exact named feature values with nulls preserved, all binary path labels, MFE/MAE, nullable continuation, fill status, gross return, spread/slippage costs, costed net return, data-quality score, label/fill policy versions, and the eight configured breakdown categories.
+
+`features_available_at` must not exceed `prediction_as_of`; `outcome_available_at` must be later than prediction and no later than dataset fetch. A row is invalid when barrier labels contradict MFE/MAE or cost arithmetic does not reconcile.
+
+## `model_evaluation_prediction`
+
+A matured research artifact containing observation/event/security IDs, prediction time, target, model family, value, calibration flag, and `trained_through`. These rows evaluate the final historical period after outcomes are known. They are distinct from immutable live-shadow `prediction` records, which must be written before outcomes mature.
+
 ## `journal_entry`
 
 Manual record only: prediction ID, user decision, simulated order/fill notes, intended risk, thesis, timestamps, exit notes, and review tags. It cannot trigger an order and must distinguish user-entered fills from backtest fills.
-

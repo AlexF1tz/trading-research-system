@@ -63,6 +63,8 @@ Gate:
 
 ## Stage 3 — labels, features, backtester, and baseline models (20–23 July)
 
+Engineering status on 16 July 2026: the chronological model-comparison machinery is implemented against a clearly labelled synthetic fixture, including frequency/rule/logistic/linear/boosted-stump baselines, calibration, clustered bootstrap intervals, breakdowns, and stability diagnostics. This does not complete Stage 3 empirically: a versioned realistic backtester and timestamp-valid survivorship-aware historical rows are still missing.
+
 Build:
 
 - versioned strategy profiles, candidate triggers, horizons, and barrier pairs;
@@ -155,4 +157,3 @@ Before Stage 4, decide whether the budget supports consolidated real-time SIP an
 ## Deferred work
 
 The following are intentionally outside the pre-competition critical path: deep learning/LLMs as primary classifiers, level-2 queue simulation, options flow, automated broker integration, cloud deployment, multi-user redistribution, and high-frequency tick backtests across the entire market.
-

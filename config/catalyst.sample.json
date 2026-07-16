@@ -1,0 +1,9 @@
+{
+  "provider": "synthetic_fixture",
+  "fail_on_quality_error": true,
+  "classifier": {
+    "stale_after_hours": 24,
+    "duplicate_similarity_threshold": 0.82,
+    "recent_category_days": 7
+  }
+}

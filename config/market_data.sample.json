@@ -1,0 +1,19 @@
+{
+  "provider": "synthetic_fixture",
+  "run_as_of": "2026-07-16T00:00:00Z",
+  "fail_on_quality_error": true,
+  "quality": {
+    "max_float_age_days": 120,
+    "split_tolerance": 0.12
+  },
+  "features": {
+    "atr_period": 14,
+    "realised_volatility_window": 30,
+    "relative_return_window": 5,
+    "index_benchmark_id": "INDEX.SPY",
+    "sector_benchmarks": {
+      "Technology": "SECTOR.TECH",
+      "Healthcare": "SECTOR.HEALTH"
+    }
+  }
+}

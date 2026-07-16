@@ -1,0 +1,26 @@
+{
+  "provider": "synthetic_fixture",
+  "allow_limited_universe": true,
+  "fail_on_quality_error": true,
+  "splits": {
+    "train_end": "2026-03-31T23:59:59Z",
+    "calibration_start": "2026-04-03T00:00:00Z",
+    "calibration_end": "2026-05-15T23:59:59Z",
+    "final_test_start": "2026-05-20T00:00:00Z",
+    "final_test_end": "2026-07-15T23:59:59Z"
+  },
+  "walk_forward": {
+    "minimum_train_rows": 30,
+    "validation_rows": 10,
+    "step_rows": 10
+  },
+  "evaluation": {
+    "calibration_bins": 10,
+    "bootstrap_repetitions": 100,
+    "bootstrap_seed": 17,
+    "classification_simplicity_tolerance": 0.005,
+    "regression_simplicity_tolerance": 0.05,
+    "overfit_brier_gap": 0.03,
+    "overfit_mae_gap": 0.5
+  }
+}

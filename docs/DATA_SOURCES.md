@@ -2,6 +2,26 @@
 
 Reviewed against provider/regulator documentation on 16 July 2026. Prices, entitlements, and terms can change; verify them immediately before subscribing or redistributing anything. This document is an engineering assessment, not legal advice.
 
+Implementation status: the current market-data, catalyst, and retail-attention modules make no network calls and consume no premium data. They supply synthetic providers for engineering tests plus strict CSV/JSONL directory interfaces for licensed or otherwise authorized exports. Real provider credentials have not been requested or assumed.
+
+The retail-attention module follows the same offline boundary. It has an explicit synthetic provider and a strict JSONL directory reader for already-authorized exports, but no live social/trend collector. Schema support for a source is not a representation that official automated access, retention, display, or model-training rights have been obtained.
+
+### Retail-attention source status
+
+| Potential source | Adapter status | Credential/cost assumption | Requirement before enablement |
+| --- | --- | --- | --- |
+| Reddit | Not implemented | No credential or free tier assumed by this module | Reconfirm current Data API terms, OAuth approval, rate policy, university/team use, retention, deletion, display, and derived-feature rights |
+| Stocktwits | Not implemented | Unknown | Confirm an official approved API/export and its current terms; do not scrape |
+| Public X posts | Not implemented | Unknown/plan-dependent | Use only current official/approved access with explicit query, retention, and derived-data rights |
+| YouTube titles/transcripts | Not implemented | Unknown/plan-dependent | Confirm official API quota and whether each transcript may be retrieved, analyzed, and retained |
+| Public TikTok pages | Not implemented | Unknown | Confirm official research/API access and permitted fields; public visibility alone is insufficient |
+| Public trading forums | Not implemented | Site-specific | Obtain site-specific automated-access permission or use a lawful manual/licensed export |
+| Google Trends or similar | Not implemented | Unknown | Select an approved export/API path and document sampling, normalization, quota, and retention semantics |
+
+Free data currently supports the engineering fixture, permission/quality gates, and normalized manual exports whose collection rights the user has independently confirmed. It does not yet support broad, continuous, multi-platform monitoring or historical attention backtesting.
+
+The quantitative-modelling module adds no external source or credential. Its bundled sample is generated engineering data. A real run depends on the selected market/reference/news sources supplying timestamp-valid historical rows and cannot be called survivorship-safe until inactive/delisted coverage is present. The normalized modelling JSONL adapter does not grant or infer rights to train on vendor data; model-training and derived-data rights must be confirmed in the upstream source contract.
+
 ## Source matrix
 
 | Need | Candidate source | Current access/cost | Credentials | What it can support | Material limitations/licensing actions |
@@ -93,4 +113,3 @@ Primary references:
 - [Benzinga API introduction/licensing contact](https://docs.benzinga.com/introduction/introduction)
 - [Reddit Data API terms](https://redditinc.com/policies/data-api-terms)
 - [Reddit published API rate-limit update](https://redditinc.com/news/apifacts)
-

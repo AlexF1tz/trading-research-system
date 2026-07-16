@@ -1,0 +1,6 @@
+{
+  "modelling_config": "config/modelling.sample.json",
+  "cost_multipliers": [1.0, 1.5, 2.0],
+  "top_k": 10,
+  "concentration_threshold": 0.3
+}
