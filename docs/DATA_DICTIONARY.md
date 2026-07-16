@@ -137,6 +137,12 @@ The implemented modelling slice consumes one matured, immutable row per historic
 
 A matured research artifact containing observation/event/security IDs, prediction time, target, model family, value, calibration flag, and `trained_through`. These rows evaluate the final historical period after outcomes are known. They are distinct from immutable live-shadow `prediction` records, which must be written before outcomes mature.
 
+## `validation_report`
+
+The independent validator writes a versioned JSON report containing audit time and scope, overall disposition, blocker IDs, status counts, independently reproduced metric counts and mismatches, per-model cost-stress scenarios, security-concentration diagnostics, structured findings, and one promotion decision per model/target pair. Every finding stores a stable check ID, pass/fail/warning/not-verifiable status, severity, evidence, impact, required action, and automated-test name.
+
+The current report deliberately identifies missing fields that must be added before empirical promotion: immutable raw-response/revision/snapshot lineage, point-in-time candidate-universe and catalyst-discovery manifests, quote/size/participation/latency/fill-fidelity evidence, same-barrier-touch policy, and halt/reopening lineage. Their absence is not represented as a null success state; it is a promotion blocker.
+
 ## `journal_entry`
 
 Manual record only: prediction ID, user decision, simulated order/fill notes, intended risk, thesis, timestamps, exit notes, and review tags. It cannot trigger an order and must distinguish user-entered fills from backtest fills.

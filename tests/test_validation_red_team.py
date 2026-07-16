@@ -192,6 +192,24 @@ class ValidationRedTeamTests(unittest.TestCase):
         self.assertLessEqual(concentration["maximum_single_security_share"], 1.0)
         self.assertEqual(self.findings["SECURITY_CONCENTRATION"]["status"], "warning")
 
+    def test_cost_stress_failures_are_rejected(self) -> None:
+        stress = self.report["cost_stress_classification_models"]
+        failed = {
+            (target, model)
+            for target, models in stress.items()
+            for model, values in models.items()
+            if not values["all_scenarios_positive"]
+        }
+        self.assertTrue(failed)
+        decisions = {
+            (value["target"], value["model"]): value
+            for value in self.report["model_decisions"]
+        }
+        for key in failed:
+            self.assertEqual(decisions[key]["decision"], "REJECT_FOR_PROMOTION")
+            self.assertIn("COST_STRESS", decisions[key]["reasons"])
+        self.assertEqual(self.findings["COST_STRESS"]["status"], "fail")
+
     def test_synthetic_fixture_is_never_promoted_as_empirical_evidence(self) -> None:
         self.assertEqual(self.findings["EMPIRICAL_STATUS"]["status"], "fail")
         self.assertEqual(

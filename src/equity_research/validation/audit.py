@@ -181,7 +181,17 @@ def _model_decisions(
     for target in BINARY_TARGETS:
         target_report = classification[target.value]
         for model_name in target_report["models"]:
-            stress = cost_stress.get(target.value, {})
+            target_stress = cost_stress.get(target.value, {})
+            stress = (
+                target_stress.get(model_name, {})
+                if isinstance(target_stress, dict)
+                else {}
+            )
+            reasons = list(global_blockers)
+            if isinstance(stress, dict) and not bool(
+                stress.get("all_scenarios_positive", False)
+            ):
+                reasons.append("COST_STRESS")
             decisions.append(
                 {
                     "target": target.value,
@@ -189,8 +199,8 @@ def _model_decisions(
                     "decision": "REJECT_FOR_PROMOTION",
                     "selected_by_walk_forward": model_name
                     == target_report["selected_model_from_walk_forward_only"],
-                    "reasons": list(global_blockers),
-                    "selected_model_cost_stress": stress if model_name == target_report["selected_model_from_walk_forward_only"] else None,
+                    "reasons": reasons,
+                    "cost_stress": stress,
                 }
             )
     for target in REGRESSION_TARGETS:
@@ -480,20 +490,44 @@ class IndependentModelValidator:
         assert isinstance(classification, dict)
         cost_stress: dict[str, object] = {}
         for target in BINARY_TARGETS:
-            selected_model = classification[target.value][
-                "selected_model_from_walk_forward_only"
-            ]
             eligible = tuple(
                 row for row in final_rows if row.binary_label(target) is not None
             )
-            values_by_id = _lookup(result.predictions, target.value, selected_model)
-            values = tuple(values_by_id[row.observation_id] for row in eligible)
-            cost_stress[target.value] = cost_stress_summary(
-                eligible,
-                values,
-                cost_multipliers=self._config.cost_multipliers,
-                top_k=self._config.top_k,
+            target_stress: dict[str, object] = {}
+            for model_name in classification[target.value]["models"]:
+                values_by_id = _lookup(result.predictions, target.value, model_name)
+                values = tuple(values_by_id[row.observation_id] for row in eligible)
+                target_stress[model_name] = cost_stress_summary(
+                    eligible,
+                    values,
+                    cost_multipliers=self._config.cost_multipliers,
+                    top_k=self._config.top_k,
+                )
+            cost_stress[target.value] = target_stress
+
+        failed_stress_models = tuple(
+            f"{target}/{model_name}"
+            for target, target_values in cost_stress.items()
+            for model_name, stress in target_values.items()
+            if not bool(stress["all_scenarios_positive"])
+        )
+        findings.append(
+            _finding(
+                "COST_STRESS",
+                "Adverse spread, slippage, and low-float fill stress",
+                AuditStatus.FAIL if failed_stress_models else AuditStatus.WARNING,
+                FindingSeverity.HIGH,
+                (
+                    f"classification model/target pairs failing at least one diagnostic scenario: {len(failed_stress_models)}",
+                    *failed_stress_models[:10],
+                    "Scenarios include 1.0x, 1.5x, and 2.0x declared costs plus a low-float-unfilled/2.5x-cost case.",
+                    "Fixture cost inputs lack quote and fill provenance, so even passing pairs are not cleared.",
+                ),
+                "Models that fail diagnostic cost stress cannot advance; passing synthetic stress still provides no empirical edge evidence.",
+                "Reject failing pairs and rerun all scenarios using timestamp-valid quotes, halts, capacity, and conservative fills.",
+                "test_cost_stress_failures_are_rejected",
             )
+        )
 
         tbs_model = classification[BinaryTarget.TARGET_BEFORE_STOP.value][
             "selected_model_from_walk_forward_only"
@@ -576,7 +610,7 @@ class IndependentModelValidator:
                 for status in AuditStatus
             },
             "metric_reproduction": reproduction.to_dict(),
-            "cost_stress_selected_models": cost_stress,
+            "cost_stress_classification_models": cost_stress,
             "security_concentration": concentration,
             "findings": [finding.to_dict() for finding in findings],
             "model_decisions": decisions,

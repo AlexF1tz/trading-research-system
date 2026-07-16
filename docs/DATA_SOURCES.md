@@ -22,6 +22,8 @@ Free data currently supports the engineering fixture, permission/quality gates, 
 
 The quantitative-modelling module adds no external source or credential. Its bundled sample is generated engineering data. A real run depends on the selected market/reference/news sources supplying timestamp-valid historical rows and cannot be called survivorship-safe until inactive/delisted coverage is present. The normalized modelling JSONL adapter does not grant or infer rights to train on vendor data; model-training and derived-data rights must be confirmed in the upstream source contract.
 
+The independent-validation module also adds no external source, credential, or licence. It can reproduce the supplied report and test code-level controls offline. It cannot independently verify vendor announcement clocks, original-versus-revised payloads, universe completeness, halt coverage, quote-derived costs, fills, or social-post completeness until the corresponding immutable source records and lawful access rights are supplied.
+
 ## Source matrix
 
 | Need | Candidate source | Current access/cost | Credentials | What it can support | Material limitations/licensing actions |

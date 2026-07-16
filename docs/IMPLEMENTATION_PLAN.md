@@ -65,6 +65,8 @@ Gate:
 
 Engineering status on 16 July 2026: the chronological model-comparison machinery is implemented against a clearly labelled synthetic fixture, including frequency/rule/logistic/linear/boosted-stump baselines, calibration, clustered bootstrap intervals, breakdowns, and stability diagnostics. This does not complete Stage 3 empirically: a versioned realistic backtester and timestamp-valid survivorship-aware historical rows are still missing.
 
+Independent validation status on 16 July 2026: a separately implemented metric engine reproduces all 2,247 reported fixture values, adversarial tests cover timestamp leakage, announcement ordering, cost arithmetic, copied social posts, random splitting, concentration, and required promotion blockers, and every current model is rejected. The next Stage 3 work must resolve immutable revision lineage, full candidate/event manifests, halt-aware path labels, and quote/capacity-aware fills before another promotion review.
+
 Build:
 
 - versioned strategy profiles, candidate triggers, horizons, and barrier pairs;

@@ -4,7 +4,7 @@ Decision-support research for a simulated university trading competition running
 
 ## Current status
 
-Architecture and staged implementation planning are complete. Provider-neutral market-data, catalyst-intelligence, and retail-attention engineering slices are implemented with explicitly synthetic fixtures, replaceable normalized-input interfaces, and fail-closed quality checks. No modelling result, return claim, live platform coverage, or production readiness is asserted. The repository was empty when planning began on 16 July 2026.
+Architecture and staged implementation planning are complete. Provider-neutral market-data, catalyst-intelligence, retail-attention, quantitative-modelling, and independent-validation engineering slices are implemented with explicitly synthetic fixtures, replaceable normalized-input interfaces, and fail-closed quality checks. The validator rejects every current model for promotion because the fixture cannot establish empirical performance and lacks survivorship-safe identities, independently verified announcement times, revision lineage, and realistic halt/fill evidence. No return claim, live platform coverage, or production readiness is asserted. The repository was empty when planning began on 16 July 2026.
 
 The initial deliverables are:
 
@@ -17,6 +17,8 @@ The initial deliverables are:
 - [Catalyst intelligence](docs/CATALYST_INTELLIGENCE.md)
 - [Retail-attention research](docs/RETAIL_ATTENTION.md)
 - [Quantitative modelling](docs/MODELLING.md)
+- [Independent validation](docs/VALIDATION.md)
+- [Current validation report](reports/VALIDATION_REPORT.md)
 
 ## Market-data sample
 
@@ -59,6 +61,16 @@ quant-modelling-sample --config config/modelling.sample.json
 ```
 
 See [Quantitative modelling](docs/MODELLING.md) for target definitions, calibration, costed ranking metrics, clustered bootstrap intervals, subgroup breakdowns, instability diagnostics, and missing real-data requirements.
+
+## Independent validation sample
+
+The validation command reruns the modelling fixture, independently recomputes every reported evaluation value without importing the modelling metric implementation, stress-tests costs and security concentration, scans for random time-series splitting, and applies fail-closed promotion gates.
+
+```powershell
+model-validation-sample --config config/validation.sample.json
+```
+
+The current run reproduces 2,247 metric values exactly within tolerance but still rejects all 36 model/target combinations. Matching arithmetic is not evidence of a tradable edge. See [Independent validation](docs/VALIDATION.md) and the [written report](reports/VALIDATION_REPORT.md).
 
 ## Non-negotiable constraints
 
