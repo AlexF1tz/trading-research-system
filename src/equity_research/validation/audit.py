@@ -144,7 +144,7 @@ def _metric_finding(result: MetricReproductionResult) -> ValidationFinding:
             (
                 f"Recomputed {result.checks} scalar, calibration, ranking, bootstrap, and breakdown values.",
                 "The validator does not import equity_research.modelling.evaluation.",
-                "Every independently recomputed value matched within 1.1e-6.",
+                "Every independently recomputed final-test value matched within 1.1e-6.",
             ),
             "No metric discrepancy was detected in the supplied fixture artifacts.",
             "Keep the independent implementation separate and run it on every candidate report.",
@@ -214,7 +214,7 @@ def _model_decisions(
                     "selected_by_walk_forward": model_name
                     == target_report["selected_model_from_walk_forward_only"],
                     "reasons": list(global_blockers),
-                    "selected_model_cost_stress": None,
+                    "cost_stress": None,
                 }
             )
     return decisions
@@ -245,6 +245,22 @@ class IndependentModelValidator:
             bootstrap_seed=self._config.bootstrap_seed,
         )
         findings: list[ValidationFinding] = [_metric_finding(reproduction)]
+        findings.append(
+            _finding(
+                "MODEL_SELECTION_REPRODUCTION",
+                "Walk-forward selection and instability reproduction",
+                AuditStatus.NOT_VERIFIABLE,
+                FindingSeverity.HIGH,
+                (
+                    "The exported predictions contain final-test values only.",
+                    "Per-fold observation membership, predictions, fitted-transform manifests, model snapshots, and feature effects are not exported.",
+                    "Rerunning the same modelling implementation is not an independent reproduction of model selection or instability flags.",
+                ),
+                "The validator cannot independently establish that walk-forward family selection and overfitting flags were calculated from the reported fold inputs.",
+                "Export immutable fold assignments, per-family fold predictions, train-fitted transform manifests, and feature-effect snapshots with data/config/code hashes.",
+                "test_walk_forward_selection_requires_fold_artifacts",
+            )
+        )
 
         feature_time_failures = tuple(
             row.observation_id

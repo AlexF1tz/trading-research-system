@@ -6,7 +6,7 @@ Disposition: **REJECT ALL MODELS FOR PROMOTION OR PERFORMANCE CLAIMS**
 
 ## Executive conclusion
 
-The evaluation report is arithmetically reproducible: an independent implementation matched all 2,247 checked scalar, calibration-bin, ranking, bootstrap, regression, and subgroup values within `1.1e-6`. The repository also uses explicit chronological partitions and expanding walk-forward folds, and the supplied fixture has no detected row-level feature/outcome look-ahead violation.
+The covered final-test evaluation is arithmetically reproducible: an independent implementation matched all 2,247 checked scalar, calibration-bin, ranking, bootstrap, regression, and subgroup values within `1.1e-6`. Walk-forward selection and instability outputs are not independently reproducible from the exported artifacts because fold predictions and fitted snapshots are absent. The repository uses explicit chronological partitions and expanding walk-forward folds, and the supplied fixture has no detected row-level feature/outcome look-ahead violation.
 
 Those passes do not validate a trading result. All 36 model/target combinations are rejected. The data are synthetic, the universe is not survivorship safe, primary announcement times cannot be independently corroborated, raw revisions cannot be distinguished, and realistic low-float fills and trading halts cannot be reproduced. No profitability claim is made.
 
@@ -15,6 +15,7 @@ Those passes do not validate a trading result. All 36 model/target combinations 
 | Check | Result | Consequence |
 | --- | --- | --- |
 | Independent metric reproduction | Pass | 2,247/2,247 values match; report arithmetic is reproducible |
+| Walk-forward selection reproduction | Not verifiable | Fold membership, predictions, transforms, and effect snapshots are not exported |
 | Row-level look-ahead controls | Pass for fixture | Upstream source timestamp truth remains unverified |
 | Chronological split/random-split scan | Pass | Final-test reuse across prior research iterations remains uncontrolled |
 | Survivorship-safe universe | Fail, blocker | Inactive/delisted security coverage is absent |

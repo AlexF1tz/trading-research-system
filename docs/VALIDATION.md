@@ -6,6 +6,8 @@ Status: automated red-team validation of the synthetic chronological modelling f
 
 The validator treats model reports and predictions as untrusted inputs. Its metric implementation does not import `equity_research.modelling.evaluation`; it independently implements labels, Brier score, log loss, equal-width calibration and ECE, top-1/3/5/10 rankings, event-clustered bootstrap intervals, regression errors, and all eight target-before-stop breakdowns. It uses shared data contracts only so observations and predictions can be aligned.
 
+The 2,247 matched checks cover final-test classification/regression outputs, calibration bins, ranking metrics, clustered intervals, and selected-model subgroup breakdowns. Walk-forward selection, train-resubstitution errors, feature effects, and overfitting flags are **not independently reproducible from the current export**: fold membership, fold predictions, fitted-transform manifests, and model/effect snapshots are missing. The audit records that limitation as `MODEL_SELECTION_REPRODUCTION=not_verifiable` and requires those immutable artifacts before promotion.
+
 Matching metrics proves that the report arithmetic is reproducible. It does not validate source timestamps, universe completeness, fills, costs, or predictive value.
 
 ## Audit coverage

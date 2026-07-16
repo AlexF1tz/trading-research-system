@@ -64,7 +64,7 @@ See [Quantitative modelling](docs/MODELLING.md) for target definitions, calibrat
 
 ## Independent validation sample
 
-The validation command reruns the modelling fixture, independently recomputes every reported evaluation value without importing the modelling metric implementation, stress-tests costs and security concentration, scans for random time-series splitting, and applies fail-closed promotion gates.
+The validation command reruns the modelling fixture, independently recomputes covered final-test evaluation values without importing the modelling metric implementation, stress-tests costs and security concentration, scans for random time-series splitting, and applies fail-closed promotion gates. It separately flags walk-forward selection and instability outputs as not independently verifiable until fold artifacts are exported.
 
 ```powershell
 model-validation-sample --config config/validation.sample.json

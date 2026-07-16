@@ -58,6 +58,15 @@ class ValidationRedTeamTests(unittest.TestCase):
             reproduction["implementation_independence"],
             "does_not_import_equity_research.modelling.evaluation",
         )
+        self.assertIn("final-test", reproduction["coverage"])
+
+    def test_walk_forward_selection_requires_fold_artifacts(self) -> None:
+        finding = self.findings["MODEL_SELECTION_REPRODUCTION"]
+        self.assertEqual(finding["status"], "not_verifiable")
+        self.assertIn(
+            "Per-fold observation membership",
+            " ".join(finding["evidence"]),
+        )
 
     def test_future_feature_and_outcome_injection_fail_closed(self) -> None:
         dataset = SyntheticModelFixtureProvider().load()

@@ -41,6 +41,14 @@ class MetricReproductionResult:
             "implementation_independence": (
                 "does_not_import_equity_research.modelling.evaluation"
             ),
+            "coverage": (
+                "final-test classification/regression metrics, calibration bins, "
+                "top-k metrics, event-clustered intervals, and selected-model breakdowns"
+            ),
+            "not_covered": (
+                "walk-forward selection, train-resubstitution metrics, feature effects, "
+                "or overfitting flags because fold artifacts are not exported"
+            ),
         }
 
 
