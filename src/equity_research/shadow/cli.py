@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from .monitor import MonitorConfig, ShadowMonitor
-from .provider import EndpointPolicy, ReplayShadowProvider
+from .provider import EndpointPolicy, ReplayShadowProvider, SecEdgarProvider
 from .storage import ImmutableStore
 from .synthetic import SyntheticShadowProvider
 
@@ -23,6 +23,8 @@ def main() -> None:
         provider = SyntheticShadowProvider()
     elif mode == "replay":
         provider = ReplayShadowProvider(Path(value["replay_path"]), loop=bool(value.get("replay_loop", False)))
+    elif mode == "sec":
+        provider = SecEdgarProvider(dict(value.get("cik_to_ticker", {})), value.get("sec_user_agent"))
     else:
         raise SystemExit("Only synthetic and cache/replay modes are enabled until approved live endpoint adapters are configured")
     monitor = ShadowMonitor(

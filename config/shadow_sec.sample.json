@@ -1,0 +1,9 @@
+{
+  "mode": "sec",
+  "data_root": "data/shadow",
+  "prediction_root": "predictions/shadow",
+  "sec_user_agent": "University Research contact@example.edu",
+  "cik_to_ticker": {"0000320193": "AAPL"},
+  "approved_news_domains": [],
+  "monitor": {"poll_interval_seconds": 60.0, "stale_after_seconds": 180.0}
+}

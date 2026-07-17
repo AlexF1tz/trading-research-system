@@ -8,8 +8,11 @@ The monitor writes append-only timestamped raw records, normalized market and ca
 
 - `synthetic`: deterministic offline source for tests and operational rehearsal.
 - `replay`: replays an explicitly supplied JSON cache without network calls.
+- `sec`: polls SEC EDGAR submissions using a configured CIK map and identifying User-Agent. It is read-only and begins with filings only; halts and live market bars remain separate follow-on providers.
 
 No live network adapter is enabled by default. A future live adapter must use only `data.alpaca.markets`, `sec.gov`, and explicitly approved news domains. Trading, paper-trading, brokerage, account, and order endpoints are rejected by policy.
+
+To run the SEC-first monitor, copy `config/shadow_sec.sample.json`, replace the placeholder contact address, set a small CIK map, and run `live-monitor --config config/shadow_sec.sample.json`. SEC automated access requires an identifying User-Agent; no API key is used.
 
 ## Git Bash
 
@@ -34,4 +37,4 @@ Records are immutable. Reusing an identifier with different content fails closed
 - Point-in-time float, halt status, and survivorship-safe universe coverage are unavailable in the current Stage 2 sample.
 - A production SEC poller requires an identifying User-Agent and monitored CIK mapping.
 - Company-news collection requires an approved/licensed provider and a reviewed domain allowlist.
-- The command therefore defaults to synthetic mode; replay is the only other enabled adapter. This is an operational collection scaffold, not evidence for modelling.
+- The command therefore defaults to synthetic mode; replay and SEC are the other enabled adapters. Nasdaq halts, live Alpaca bars, licensed news, and social providers remain staged follow-on work. This is an operational collection scaffold, not evidence for modelling.

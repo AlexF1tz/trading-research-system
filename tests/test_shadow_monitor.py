@@ -7,7 +7,7 @@ import pytest
 
 from equity_research.shadow.contracts import MonitorMode, SourceFamily
 from equity_research.shadow.monitor import MODELLING_BLOCK, MonitorConfig, ShadowMonitor
-from equity_research.shadow.provider import EndpointPolicy, ReplayShadowProvider, TransientSourceError
+from equity_research.shadow.provider import EndpointPolicy, ReplayShadowProvider, SecEdgarProvider, TransientSourceError
 from equity_research.shadow.storage import ImmutableStore
 from equity_research.shadow.synthetic import SyntheticShadowProvider
 
@@ -111,3 +111,26 @@ def test_replay_provider_uses_cached_cycle_without_network(tmp_path):
     assert batch.provider == "captured-test"
     with pytest.raises(StopIteration):
         provider.poll(datetime(2026, 7, 17, 13, 31, tzinfo=UTC))
+
+
+class FakeResponse:
+    def __init__(self, payload): self.payload = payload
+    def __enter__(self): return self
+    def __exit__(self, *args): return False
+    def read(self): return json.dumps(self.payload).encode()
+
+
+def test_sec_provider_normalizes_and_deduplicates_filings():
+    payload = {"filings": {"recent": {
+        "accessionNumber": ["0000320193-26-000001", "0000320193-26-000002"],
+        "filingDate": ["2026-07-17", "2026-07-17"], "form": ["8-K", "8-K"]
+    }}}
+    provider = SecEdgarProvider({"320193": "AAPL"}, "Research contact@example.edu", lambda *args, **kwargs: FakeResponse(payload))
+    now = datetime(2026, 7, 17, 13, 30, tzinfo=UTC)
+    first = provider.poll(now)
+    second = provider.poll(now)
+    assert first.mode is MonitorMode.LIVE
+    assert len(first.catalyst_batch.documents) == 2
+    assert len(first.raw_items) == 2
+    assert second.catalyst_batch.documents == ()
+    assert first.raw_items[0].provider_received_at == now

@@ -46,6 +46,7 @@ def json_safe(value: object) -> object:
 class MonitorMode(str, Enum):
     SYNTHETIC = "synthetic"
     REPLAY = "replay"
+    LIVE = "live"
 
 
 class SourceFamily(str, Enum):
@@ -76,6 +77,7 @@ class RawSourceItem:
     processing_timestamp: datetime
     payload: dict[str, object]
     license_class: str
+    provider_received_at: datetime | None = None
 
     @property
     def content_sha256(self) -> str:
@@ -89,6 +91,7 @@ class RawSourceItem:
             "source_timestamp": utc_text(self.source_timestamp),
             "first_seen_at": utc_text(self.first_seen_at),
             "processing_timestamp": utc_text(self.processing_timestamp),
+            "provider_received_at": utc_text(self.provider_received_at) if self.provider_received_at else None,
             "payload_sha256": self.content_sha256,
             "payload": json_safe(self.payload),
             "license_class": self.license_class,
@@ -114,6 +117,7 @@ class MarketObservation:
     halt_status: str | None
     free_float: int | None
     missing_flags: tuple[str, ...] = ()
+    provider_received_at: datetime | None = None
 
     def to_dict(self) -> dict[str, object]:
         result = asdict(self)
@@ -124,6 +128,7 @@ class MarketObservation:
         ):
             result[name] = utc_text(getattr(self, name))
         result["missing_flags"] = list(self.missing_flags)
+        result["provider_received_at"] = utc_text(self.provider_received_at) if self.provider_received_at else None
         return result
 
 
