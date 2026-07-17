@@ -17,6 +17,7 @@ catalyst-sample = "equity_research.catalyst_intelligence.sample:main"
 retail-attention-sample = "equity_research.retail_attention.sample:main"
 quant-modelling-sample = "equity_research.modelling.sample:main"
 model-validation-sample = "equity_research.validation.sample:main"
+alpaca-historical-quality = "equity_research.market_data.historical_quality:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

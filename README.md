@@ -4,7 +4,7 @@ Decision-support research for a simulated university trading competition running
 
 ## Current status
 
-Architecture and staged implementation planning are complete. Provider-neutral market-data, catalyst-intelligence, retail-attention, quantitative-modelling, and independent-validation engineering slices are implemented with explicitly synthetic fixtures, replaceable normalized-input interfaces, and fail-closed quality checks. The validator rejects every current model for promotion because the fixture cannot establish empirical performance and lacks survivorship-safe identities, independently verified announcement times, revision lineage, and realistic halt/fill evidence. No return claim, live platform coverage, or production readiness is asserted. The repository was empty when planning began on 16 July 2026.
+Architecture and staged implementation planning are complete. Provider-neutral market-data, catalyst-intelligence, retail-attention, quantitative-modelling, and independent-validation engineering slices are implemented with explicitly synthetic fixtures, replaceable normalized-input interfaces, and fail-closed quality checks. A bounded credential-gated Alpaca historical-bars adapter is implemented but has not been run against real data in this repository. The validator rejects every current model for promotion because the fixture cannot establish empirical performance and lacks survivorship-safe identities, independently verified announcement times, revision lineage, and realistic halt/fill evidence. No return claim, live platform coverage, or production readiness is asserted. The repository was empty when planning began on 16 July 2026.
 
 The initial deliverables are:
 
@@ -19,6 +19,7 @@ The initial deliverables are:
 - [Quantitative modelling](docs/MODELLING.md)
 - [Independent validation](docs/VALIDATION.md)
 - [Current validation report](reports/VALIDATION_REPORT.md)
+- [Alpaca historical Stage 2 adapter](docs/ALPACA_HISTORICAL.md)
 
 ## Market-data sample
 
@@ -71,6 +72,37 @@ model-validation-sample --config config/validation.sample.json
 ```
 
 The current run reproduces 2,247 metric values exactly within tolerance but still rejects all 36 model/target combinations. Matching arithmetic is not evidence of a tradable edge. See [Independent validation](docs/VALIDATION.md) and the [written report](reports/VALIDATION_REPORT.md).
+
+## Real historical data quality check — Stage 2
+
+The Stage 2 command uses Alpaca's historical **market-data** endpoint only. It performs credentialed GET requests for a bounded three-stock sample, preserves each raw response and request manifest under ignored `data/raw/`, normalizes minute and daily bars into the existing provider-neutral schema, and writes an immutable timestamped quality run. It does not call account, order, position, or broker endpoints; it does not train a model or generate predictions.
+
+The sample configuration uses the free IEX feed for AAPL, MSFT, and JPM, one minute-bar session on 10 July 2026, and a forty-day daily-bar window. IEX is single-venue data, so the result is deliberately marked incomplete and cannot support full-market volume, spread, liquidity, survivorship, or profitability claims.
+
+Exact setup from the repository root in Git Bash on Windows:
+
+```bash
+python -m venv .venv
+source .venv/Scripts/activate
+python -m pip install --upgrade pip
+python -m pip install -e .
+
+read -r -p "Alpaca API key ID: " ALPACA_API_KEY_ID
+read -r -s -p "Alpaca API secret key: " ALPACA_API_SECRET_KEY
+printf '\n'
+export ALPACA_API_KEY_ID ALPACA_API_SECRET_KEY
+
+alpaca-historical-quality \
+  --config config/alpaca_historical.sample.json \
+  --output-dir output/alpaca_historical_quality \
+  --repo-root .
+
+status=$?
+unset ALPACA_API_KEY_ID ALPACA_API_SECRET_KEY
+test "$status" -eq 0
+```
+
+The command exits with status `2` after writing available diagnostics when authentication, retrieval, normalization, reconciliation, or quality checks fail. It never silently converts a failed check into a successful run. Review [Alpaca historical Stage 2 adapter](docs/ALPACA_HISTORICAL.md) before using or retaining provider data.
 
 ## Non-negotiable constraints
 

@@ -2,7 +2,7 @@
 
 Reviewed against provider/regulator documentation on 16 July 2026. Prices, entitlements, and terms can change; verify them immediately before subscribing or redistributing anything. This document is an engineering assessment, not legal advice.
 
-Implementation status: the current market-data, catalyst, and retail-attention modules make no network calls and consume no premium data. They supply synthetic providers for engineering tests plus strict CSV/JSONL directory interfaces for licensed or otherwise authorized exports. Real provider credentials have not been requested or assumed.
+Implementation status: market data now includes one credential-gated, GET-only Alpaca historical-bars adapter for a bounded real sample. It preserves content-addressed raw responses, normalizes minute/daily bars, and runs quality checks without modelling. It has not been executed against real data because no credential is present. Catalyst and retail-attention modules still make no network calls; all modules retain synthetic/offline adapters for tests. No premium entitlement or provider coverage is assumed.
 
 The retail-attention module follows the same offline boundary. It has an explicit synthetic provider and a strict JSONL directory reader for already-authorized exports, but no live social/trend collector. Schema support for a source is not a representation that official automated access, retention, display, or model-training rights have been obtained.
 
@@ -32,7 +32,7 @@ The independent-validation module also adds no external source, credential, or l
 | Current universe/reference | Nasdaq Trader symbol directory plus SEC ticker/CIK file | Free/current snapshot | None | Current listed issues, exchange/category/test/status fields, daily snapshot archive going forward | Current state is not a survivorship-free historical master. Nasdaq pages distinguish non-commercial/internal-use data and events data; review terms before broader display. |
 | Halts | Nasdaq Trader trade-halt RSS | Free | None | Nasdaq- and other-exchange-listed halt/pause status and historical date queries | Updates once a minute; do not poll more often. RSS is not a historical tick/LULD feed. |
 | Off-exchange short-sale volume | FINRA daily short-sale volume | Free for non-commercial use | None for files; API may have its own access method | Delayed daily aggregate context | It is not short interest, excludes non-publicly disseminated activity, and is not consolidated with exchange short-sale files. |
-| Historical/live equities | Alpaca Market Data | Basic $0; Algo Trader Plus currently $99/month | API key/secret | Basic: historical since 2016, older SIP history, limited real-time IEX; paid: consolidated all-US-exchange coverage | Basic live feed is IEX only and capped at 30 WebSocket symbols; latest SIP data is restricted. Confirm non-professional/team/display entitlement. |
+| Historical/live equities | Alpaca Market Data | Bounded historical adapter implemented; plan pricing/entitlements must be rechecked | `ALPACA_API_KEY_ID` and `ALPACA_API_SECRET_KEY` | Minute/daily bars from the historical bars endpoint; sample defaults to IEX | IEX is single venue; SIP is entitlement-dependent. No quotes/reference/halts/float/delisting from this adapter. Raw retention and university/team rights must be confirmed; no redistribution. |
 | Historical/live equities alternative | Massive Stocks | Personal tiers currently $0, $29, $79, $199/month; business/exchange licensing separate | API key | Aggregates, reference/corporate actions, and at entitled tiers trades, quotes, flat files, snapshots, LULD | Confirm the exact plan for historical depth, real-time trades/NBBO, flat files, and team use. Never infer entitlement from endpoint existence. |
 | Broad company news/sentiment | Alpha Vantage | Free majority endpoints at 25 requests/day; premium plans available | API key | Small research samples and news/sentiment prototype | 25/day is insufficient for broad live monitoring. Real-time/delayed US data is premium/personal; commercial use requires sales contact. Verify news-history and storage rights. |
 | Low-latency company news | Benzinga APIs | Quote/contact licensing | API token | Real-time REST/TCP news metadata/content at licensed tier | Cost and redistribution/storage rights require written quote/terms. Do not implement against assumed access. |
@@ -108,6 +108,9 @@ Primary references:
 - [FINRA short-sale volume](https://www.finra.org/finra-data/browse-catalog/short-sale-volume)
 - [Alpaca market-data plans](https://docs.alpaca.markets/us/v1.1/docs/about-market-data-api)
 - [Alpaca market-data FAQ](https://docs.alpaca.markets/us/docs/market-data-faq)
+- [Alpaca historical bars reference](https://docs.alpaca.markets/us/v1.4.2/reference/stockbars)
+- [Alpaca historical stock feed descriptions](https://docs.alpaca.markets/us/v1.1/docs/historical-stock-data-1)
+- [Alpaca customer agreement](https://files.alpaca.markets/disclosures/library/AcctAppMarginAndCustAgmt.pdf)
 - [Massive stocks API overview and plan table](https://massive.com/docs/rest/stocks)
 - [Massive stocks flat files](https://massive.com/docs/flat-files/stocks/overview)
 - [Alpha Vantage premium limits](https://www.alphavantage.co/premium/)

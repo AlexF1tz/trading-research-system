@@ -1,0 +1,51 @@
+{
+  "provider": "alpaca_historical_bars",
+  "universe": [
+    {
+      "security_id": "US:AAPL",
+      "ticker": "AAPL",
+      "exchange": "NASDAQ"
+    },
+    {
+      "security_id": "US:MSFT",
+      "ticker": "MSFT",
+      "exchange": "NASDAQ"
+    },
+    {
+      "security_id": "US:JPM",
+      "ticker": "JPM",
+      "exchange": "NYSE"
+    }
+  ],
+  "minute_range": {
+    "start": "2026-07-10T08:00:00Z",
+    "end": "2026-07-11T00:00:00Z",
+    "session_dates": [
+      "2026-07-10"
+    ]
+  },
+  "daily_range": {
+    "start": "2026-06-01T00:00:00Z",
+    "end": "2026-07-11T00:00:00Z"
+  },
+  "included_sessions": [
+    "regular"
+  ],
+  "feed": "iex",
+  "adjustment": "raw",
+  "page_limit": 10000,
+  "max_pages_per_timeframe": 100,
+  "timeout_seconds": 30,
+  "minimum_historical_lag_minutes": 15,
+  "raw_root": "data/raw/alpaca",
+  "license_class": "alpaca_personal_noncommercial_research_review_required",
+  "rate_limit": {
+    "minimum_request_interval_seconds": 0.35,
+    "max_attempts": 5,
+    "max_retry_delay_seconds": 30
+  },
+  "quality": {
+    "max_float_age_days": 120,
+    "split_tolerance": 0.12
+  }
+}

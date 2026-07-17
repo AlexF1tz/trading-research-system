@@ -20,6 +20,10 @@ The implemented standard-library market-data slice refines this contract in `src
 | `adapter_version` | Version of parsing/normalization logic |
 | `license_class` | Configured retention/display category |
 
+### `raw_http_response` and `raw_request_manifest`
+
+The Alpaca Stage 2 adapter stores the exact response bytes by SHA-256 under ignored local data storage. A separate immutable request manifest records request URL without credentials, market-data adapter version, timeframe, attempt number, HTTP status, retrieval time, response hash/size, and allowlisted request/rate-limit response headers. Credential header names may be recorded; credential values never are. Retry/error responses are preserved as well as successful pages.
+
 ## `security_master_scd`
 
 Effective-dated identity table. Ticker is not the primary key.
@@ -46,6 +50,8 @@ Effective-dated identity table. Ticker is not the primary key.
 | `adjustment` | Raw/split-adjusted/other explicit state |
 | `session` | Premarket, regular, after-hours, overnight |
 | `available_at` | When the completed bar could be used |
+
+For Alpaca historical bars, provider fields map as `t/o/h/l/c/v/vw/n` to timestamp/OHLC/volume/VWAP/trade count. Minute availability is bar start plus one minute. Daily availability is conservatively 16:01 America/New_York. Retrieval time and raw response hashes remain separate provenance; neither replaces provider event time.
 
 ## `market_quote` and `market_trade`
 

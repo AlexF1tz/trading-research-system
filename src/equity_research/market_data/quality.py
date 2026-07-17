@@ -135,6 +135,19 @@ def run_quality_checks(
                 )
             )
 
+    known_security_ids = {instrument.security_id for instrument in dataset.instruments}
+    for bar in all_bars:
+        if bar.security_id not in known_security_ids:
+            issues.append(
+                QualityIssue(
+                    "BAR_SECURITY_UNKNOWN",
+                    Severity.ERROR,
+                    "bar references a security absent from the normalized instrument set",
+                    bar.security_id,
+                    bar.timestamp,
+                )
+            )
+
     for action in dataset.corporate_actions:
         for field_name, timestamp in (
             ("effective_at", action.effective_at),
@@ -363,6 +376,16 @@ def run_quality_checks(
     daily_by_security: dict[str, list[Bar]] = {}
     for bar in dataset.daily_bars:
         daily_by_security.setdefault(bar.security_id, []).append(bar)
+    for security_id in dataset.coverage.expected_security_ids:
+        if not daily_by_security.get(security_id):
+            issues.append(
+                QualityIssue(
+                    "MISSING_DAILY_BARS",
+                    Severity.ERROR,
+                    "expected security has no daily bars in the requested range",
+                    security_id,
+                )
+            )
     for action in dataset.corporate_actions:
         if action.action_type is not ActionType.SPLIT or not action.split_ratio:
             continue

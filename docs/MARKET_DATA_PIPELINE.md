@@ -1,5 +1,7 @@
 # Market-Data Pipeline
 
+Stage 2 now also provides a bounded read-only Alpaca historical-bars adapter and quality-only command. See [ALPACA_HISTORICAL.md](ALPACA_HISTORICAL.md). The original synthetic/CSV sample remains the deterministic feature-engineering path; the real-data command intentionally stops after normalization and quality reporting.
+
 Implemented 16 July 2026. This is an engineering vertical slice, not a profitable-strategy or market-coverage claim.
 
 ## What works
@@ -102,4 +104,3 @@ market-data-sample --config config/market_data.sample.json --output-dir output/m
 The sample currently creates 10,790 one-minute bars, 110 daily bars, six identities including one explicitly synthetic delisted identity, two corporate actions, one halt, and 10,790 feature rows. Its output is stamped `ENGINEERING_FIXTURE_NOT_EMPIRICAL_EVIDENCE`.
 
 Expected warnings demonstrate limitations rather than filling them: one active common stock and the synthetic delisted identity have no free-float observation; the fixture is not a complete historical universe; and its bid/ask values are not consolidated NBBO.
-
