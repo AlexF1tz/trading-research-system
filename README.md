@@ -4,7 +4,9 @@ Decision-support research for a simulated university trading competition running
 
 ## Current status
 
-Architecture and staged implementation planning are complete. Stage 2 now uses a credential-gated Alpaca historical-bars adapter as the primary market-data path for a bounded real sample. The first three-stock, one-month IEX sample was retrieved on 17 July 2026 and passed raw/normalized reconciliation, but it remains blocked by 340 unobserved JPM minute intervals plus missing quote, halt, float, reference, and survivorship-safe universe data. The adapter supports daily bars, local `.env` credentials for retrieval, credential-free cache-only validation, immutable content-addressed raw responses, hash-verified request caching, retry/pacing controls, normalization into the existing provider-neutral schema, and fail-closed quality reporting. Synthetic data remains only as a deterministic offline regression fixture. No model is promoted and no return claim, live platform coverage, or production readiness is asserted.
+Architecture and staged implementation planning are complete. Stage 2 now uses a credential-gated Alpaca historical-bars adapter as the primary market-data path for a bounded real sample. The first three-stock, one-month IEX sample was retrieved on 17 July 2026 and passed raw/normalized reconciliation, but it remains blocked by 340 unobserved JPM minute intervals plus missing quote, halt, float, reference, and survivorship-safe universe data. Stage 3 adds a read-only shadow monitor in synthetic and cache/replay modes; it preserves that empirical-modelling block in every research alert and heartbeat. No model is promoted and no return claim, live platform coverage, or production readiness is asserted.
+
+Run the offline Stage 3 operational rehearsal with `live-monitor --config config/shadow_monitor.sample.json`; it continues until Ctrl+C. See [Stage 3 shadow monitor](docs/SHADOW_MONITOR.md).
 
 The initial deliverables are:
 

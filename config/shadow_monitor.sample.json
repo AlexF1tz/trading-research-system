@@ -1,0 +1,13 @@
+{
+  "mode": "synthetic",
+  "data_root": "data/shadow",
+  "prediction_root": "predictions/shadow",
+  "approved_news_domains": [],
+  "monitor": {
+    "poll_interval_seconds": 30.0,
+    "stale_after_seconds": 120.0,
+    "reconnect_initial_seconds": 1.0,
+    "reconnect_max_seconds": 30.0,
+    "outcome_horizon_minutes": 120
+  }
+}

@@ -85,6 +85,10 @@ No credential should be committed. `.env.example` will contain names only, and r
 
 Storage and compute can remain local at $0 incremental service cost for the initial scope. Tick/quote history can become large enough to require additional disk; size must be measured from the selected sample before procurement.
 
+## Stage 3 shadow-source enforcement
+
+The Stage 3 endpoint policy accepts fixture URLs only in synthetic/replay mode. Network market data is restricted to `data.alpaca.markets`, SEC inputs to `sec.gov` subdomains, and news to an explicit configured domain allowlist. Trading, paper-trading, brokerage, account, and order hosts are prohibited. No live network source is enabled by the sample configuration; activating one requires a separately reviewed read-only adapter and applicable credentials/user-agent identification.
+
 ## Licensing controls to implement
 
 - Tag every raw object and normalized dataset with provider and licensing class.

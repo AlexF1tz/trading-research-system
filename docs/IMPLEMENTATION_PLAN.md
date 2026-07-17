@@ -90,6 +90,12 @@ Gate:
 - backtest report separates signal-path and executable-policy outcomes;
 - no profitability claim is made from the development sample.
 
+## Stage 3A — read-only shadow collection and research alerts (implemented)
+
+The `live-monitor` command supplies continuous Ctrl+C operation plus finite synthetic and cache/replay rehearsals. It persists immutable raw inputs, normalized market/catalyst records, gated features, research-only alerts, heartbeats, reconnect state, stale-source flags, and append-only outcomes. The Alpaca/IEX empirical-modelling block remains mandatory in every alert and heartbeat. This stage does not train, score, recommend, or execute.
+
+Live network activation remains gated on configured read-only adapters and accepted source terms. Synthetic and replay modes are operationally testable without credentials.
+
 ## Stage 4 — shadow predictions, dashboard, and journal (22–25 July)
 
 Build:

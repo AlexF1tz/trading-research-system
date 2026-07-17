@@ -130,6 +130,15 @@ Stores `feature_set_version`, `security_id`, `prediction_as_of`, strategy/profil
 
 The full contract is in [PREDICTION_SCHEMA.md](PREDICTION_SCHEMA.md). It is append-only and initially has a pending outcome.
 
+## Stage 3 shadow records
+
+- `raw_source_item`: source ID/family/URL, source timestamp, first-seen timestamp, processing timestamp, payload hash, immutable payload, and licence class.
+- `market_observation`: stable security ID, ticker label, source/first-seen/processing timestamps, feed, bar completeness, close/volume, bid/ask, consolidated-coverage flag, halt status, point-in-time float, and explicit missing flags.
+- `shadow_feature_record`: generated only from complete current and prior observations; records one-minute return, dollar volume, spread, bar float rotation, `as_of`, and `available_at`.
+- `research_alert`: research-only catalyst observation with data-quality flags, stale sources, the mandatory Alpaca/IEX empirical-modelling block, null execution recommendation, and false profitability/execution fields.
+- `heartbeat`: append-only source-health record with cycle, reconnect attempt, stale sources, counts, mandatory modelling block, and execution disabled.
+- `shadow_outcome`: append-only horizon evaluation referencing the alert ID; records return/MFE/MAE or insufficient coverage and always has `used_for_training=false`.
+
 ## `prediction_outcome`
 
 | Field | Meaning |
