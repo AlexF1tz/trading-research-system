@@ -1,6 +1,6 @@
 # Alpaca Historical Market-Data Adapter
 
-Status: implemented bounded Stage 2 ingestion and quality checking. A credentialed real-data run has not been executed in this repository because no credentials are present. This module is read-only research infrastructure, not a broker integration.
+Status: implemented bounded Stage 2 ingestion and quality checking. The first credentialed real-data sample was retrieved on 17 July 2026; reconciliation passed, but quality blockers remain. This module is read-only research infrastructure, not a broker integration.
 
 ## Read-only boundary
 
@@ -36,6 +36,8 @@ The adapter follows every `next_page_token` until null and fails on repeated tok
 
 Successful HTTP 200 responses are cached for 24 hours by default. The cache key includes the adapter version, exact request URL, and timeframe, so changing symbols, dates, feed, adjustment, page token, or adapter version cannot reuse a different response. Each cache lookup verifies the append-only cache record, source path confinement, raw manifest identity, and response SHA-256. Error responses are preserved for audit but never cached. A corrupt or future-dated cache record fails closed instead of silently falling back to the network. The ingestion audit separates total artifact uses, network requests, and cache hits.
 
+Alpaca stock bars are trade aggregates, not a guaranteed one-row-per-minute grid. The provider documents that an interval with no eligible price-forming trade produces no bar. For this adapter the validator therefore uses `UNOBSERVED_TRADE_BAR_INTERVALS`, not the generic complete-grid `MISSING_BARS`. It remains an error: without trades, quotes, and halt evidence the system cannot distinguish a valid no-trade interval from lost coverage or safely reconstruct the price path.
+
 Alpaca's provider bar timestamp `t` is preserved as UTC `timestamp`. Minute `available_at` is conservatively the bar start plus one minute. Daily `available_at` is 16:01 America/New_York for the bar's market date; this is intentionally later than an early close rather than earlier. Retrieval timestamps are recorded separately in coverage and raw manifests.
 
 ## Raw preservation and normalization
@@ -63,6 +65,18 @@ alpaca-historical-quality \
   --repo-root . \
   --env-file .env
 ```
+
+To reproduce validation from exact, still-valid cache objects without reading `.env` or permitting network fallback:
+
+```bash
+alpaca-historical-quality \
+  --cache-only \
+  --config config/alpaca_historical.sample.json \
+  --output-dir output/alpaca_historical_quality \
+  --repo-root .
+```
+
+Provider retrieval time remains immutable provenance. A separate UTC validation timestamp names each cached rerun, so it cannot overwrite or collide with the original run.
 
 Copy `.env.example` to `.env`, populate the two Alpaca variables, and leave `.env` ignored by Git. If `.env` is absent, normal process-environment credentials still work. Checks include duplicate/missing bars, UTC and session boundaries, impossible OHLCV, daily-bar presence, unknown security IDs, raw/normalized reconciliation, unavailable float, incomplete historical universe, and absent consolidated quotes. A nonzero quality-error count returns exit status `2` after artifacts are saved. The command sets `training_performed=false`, `predictions_generated=false`, and `profitability_claimed=false` in every successful run manifest.
 

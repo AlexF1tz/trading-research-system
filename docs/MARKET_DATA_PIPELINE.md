@@ -64,7 +64,8 @@ Errors stop the pipeline by default. Warnings preserve the run while lowering it
 
 Critical error examples:
 
-- `DUPLICATE_BAR`, `MISSING_BARS`;
+- `DUPLICATE_BAR`, `MISSING_BARS` for a declared complete grid;
+- `UNOBSERVED_TRADE_BAR_INTERVALS` for sparse trade aggregates whose path cannot be reconstructed from available evidence;
 - `INCORRECT_SESSION_BOUNDARY`, `TIMEZONE_NOT_UTC`, `BAR_NOT_MINUTE_ALIGNED`;
 - `BAR_AVAILABLE_TOO_EARLY`;
 - `IMPOSSIBLE_PRICE`, `IMPOSSIBLE_OHLC`, `IMPOSSIBLE_VOLUME`, `CROSSED_QUOTE`;

@@ -16,6 +16,11 @@ class Severity(str, Enum):
     WARNING = "warning"
 
 
+class BarGapPolicy(str, Enum):
+    COMPLETE_INTERVAL_GRID = "complete_interval_grid"
+    TRADE_AGGREGATE = "trade_aggregate"
+
+
 @dataclass(frozen=True, slots=True)
 class QualityIssue:
     code: str
@@ -43,6 +48,7 @@ class QualityConfig:
     run_as_of: datetime
     max_float_age_days: int = 120
     split_tolerance: float = 0.12
+    bar_gap_policy: BarGapPolicy = BarGapPolicy.COMPLETE_INTERVAL_GRID
 
 
 class DataQualityError(RuntimeError):
@@ -363,11 +369,25 @@ def run_quality_checks(
                     and not _is_halted(dataset, security_id, timestamp)
                 ]
                 for start, end in _missing_ranges(missing):
+                    if config.bar_gap_policy is BarGapPolicy.TRADE_AGGREGATE:
+                        code = "UNOBSERVED_TRADE_BAR_INTERVALS"
+                        message = (
+                            f"trade-aggregate feed emitted no {session.value} bar "
+                            f"from {start.isoformat()} through {end.isoformat()}; "
+                            "without eligible-trade, quote, or halt evidence the "
+                            "interval remains unobserved"
+                        )
+                    else:
+                        code = "MISSING_BARS"
+                        message = (
+                            f"missing expected {session.value} bars from "
+                            f"{start.isoformat()} through {end.isoformat()}"
+                        )
                     issues.append(
                         QualityIssue(
-                            "MISSING_BARS",
+                            code,
                             Severity.ERROR,
-                            f"missing expected {session.value} bars from {start.isoformat()} through {end.isoformat()}",
+                            message,
                             security_id,
                             start,
                         )

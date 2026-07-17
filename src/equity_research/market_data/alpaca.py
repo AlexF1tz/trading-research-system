@@ -627,15 +627,21 @@ class AlpacaHistoricalProvider:
     def __init__(
         self,
         config: AlpacaHistoricalConfig,
-        credentials: AlpacaCredentials,
+        credentials: AlpacaCredentials | None,
         *,
+        cache_only: bool = False,
         transport: ReadOnlyHttpTransport | None = None,
         clock: Callable[[], datetime] | None = None,
         monotonic: Callable[[], float] | None = None,
         sleeper: Callable[[float], None] | None = None,
     ) -> None:
+        if credentials is None and not cache_only:
+            raise AlpacaConfigurationError(
+                "credentials are required unless cache_only is enabled"
+            )
         self._config = config
         self._credentials = credentials
+        self._cache_only = cache_only
         self._transport = transport or UrllibReadOnlyTransport()
         self._clock = clock or (lambda: datetime.now(UTC))
         self._monotonic = monotonic or time.monotonic
@@ -654,6 +660,10 @@ class AlpacaHistoricalProvider:
         if self._audit is None:
             raise RuntimeError("provider audit is unavailable before load()")
         return self._audit
+
+    @property
+    def cache_only(self) -> bool:
+        return self._cache_only
 
     def _pace(self) -> None:
         now = self._monotonic()
@@ -704,6 +714,12 @@ class AlpacaHistoricalProvider:
                 self._artifacts.append(artifact)
                 self._cache_hits += 1
                 return self._decode_accepted_page(response, artifact)
+        if self._cache_only:
+            raise AlpacaRequestError(
+                "cache-only run found no valid cached response for the exact request"
+            )
+        if self._credentials is None:
+            raise AssertionError("network request reached without credentials")
         for attempt in range(1, self._config.max_attempts + 1):
             self._pace()
             self._network_requests += 1

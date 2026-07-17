@@ -9,7 +9,7 @@ import os
 import re
 import sys
 from dataclasses import asdict, is_dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from enum import Enum
 from pathlib import Path
 from collections.abc import Callable
@@ -28,7 +28,13 @@ from .alpaca import (
 from .calendar import UsEquityCalendar
 from .contracts import Exchange, ProviderDataset, Session
 from .provider import parse_timestamp
-from .quality import QualityConfig, QualityIssue, Severity, run_quality_checks
+from .quality import (
+    BarGapPolicy,
+    QualityConfig,
+    QualityIssue,
+    Severity,
+    run_quality_checks,
+)
 
 
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -59,6 +65,14 @@ def _parser() -> argparse.ArgumentParser:
         help=(
             "optional local dotenv file; process environment values take precedence "
             "and values are never persisted"
+        ),
+    )
+    parser.add_argument(
+        "--cache-only",
+        action="store_true",
+        help=(
+            "validate exact cached responses without reading credentials or "
+            "permitting a network fallback"
         ),
     )
     return parser
@@ -309,8 +323,8 @@ def _reconciliation_issues(provider: AlpacaHistoricalProvider) -> tuple[QualityI
     )
 
 
-def _run_directory(output_root: Path, retrieved_at: datetime) -> Path:
-    stamp = retrieved_at.strftime("%Y%m%dT%H%M%S%fZ")
+def _run_directory(output_root: Path, validated_at: datetime) -> Path:
+    stamp = validated_at.strftime("%Y%m%dT%H%M%S%fZ")
     return output_root / f"run-{stamp}"
 
 
@@ -320,8 +334,9 @@ def write_quality_artifacts(
     provider: AlpacaHistoricalProvider,
     issues: tuple[QualityIssue, ...],
     config_sha256: str,
+    validated_at: datetime,
 ) -> dict[str, object]:
-    run_dir = _run_directory(output_root, dataset.coverage.retrieved_at)
+    run_dir = _run_directory(output_root, validated_at)
     normalized = run_dir / "normalized"
     files: dict[str, str] = {}
     hashes: dict[str, str] = {}
@@ -361,6 +376,8 @@ def write_quality_artifacts(
         "provider": dataset.coverage.provider,
         "dataset_kind": dataset.coverage.dataset_kind,
         "retrieved_at": dataset.coverage.retrieved_at,
+        "validated_at": validated_at,
+        "cache_only": provider.cache_only,
         "config_file_sha256": config_sha256,
         "network_requests": provider.audit.network_requests,
         "cache_hits": provider.audit.cache_hits,
@@ -394,7 +411,13 @@ def run_historical_quality_check(
     clock: Callable[[], datetime] | None = None,
     monotonic: Callable[[], float] | None = None,
     sleeper: Callable[[float], None] | None = None,
+    cache_only: bool = False,
 ) -> dict[str, object]:
+    effective_clock = clock or (lambda: datetime.now(timezone.utc))
+    validated_at = effective_clock()
+    if validated_at.tzinfo is None or validated_at.utcoffset() is None:
+        raise AlpacaConfigurationError("validation clock must be timezone-aware")
+    validated_at = validated_at.astimezone(timezone.utc)
     config_bytes = config_path.read_bytes()
     config_sha256 = hashlib.sha256(config_bytes).hexdigest()
     config = load_historical_config(config_path, repo_root)
@@ -402,12 +425,17 @@ def run_historical_quality_check(
         raise AlpacaConfigurationError(
             "historical config changed while the run was starting"
         )
-    credentials = AlpacaCredentials.from_environment(environment)
+    credentials = (
+        None
+        if cache_only
+        else AlpacaCredentials.from_environment(environment)
+    )
     provider = AlpacaHistoricalProvider(
         config,
         credentials,
+        cache_only=cache_only,
         transport=transport,
-        clock=clock,
+        clock=effective_clock,
         monotonic=monotonic,
         sleeper=sleeper,
     )
@@ -422,6 +450,7 @@ def run_historical_quality_check(
             run_as_of=dataset.coverage.retrieved_at,
             max_float_age_days=int(quality_raw.get("max_float_age_days", 120)),
             split_tolerance=float(quality_raw.get("split_tolerance", 0.12)),
+            bar_gap_policy=BarGapPolicy.TRADE_AGGREGATE,
         ),
     ) + _reconciliation_issues(provider)
     if config_path.read_bytes() != config_bytes:
@@ -429,19 +458,27 @@ def run_historical_quality_check(
             "historical config changed during the quality run"
         )
     return write_quality_artifacts(
-        output_root, dataset, provider, issues, config_sha256
+        output_root,
+        dataset,
+        provider,
+        issues,
+        config_sha256,
+        validated_at,
     )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        environment = load_environment_file(args.env_file)
+        environment = (
+            None if args.cache_only else load_environment_file(args.env_file)
+        )
         summary = run_historical_quality_check(
             args.config,
             args.output_dir,
             args.repo_root,
             environment=environment,
+            cache_only=args.cache_only,
         )
     except (
         AlpacaConfigurationError,
@@ -456,6 +493,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "error": str(exc),
                     "training_performed": False,
                     "profitability_claimed": False,
+                    "cache_only": args.cache_only,
                 },
                 indent=2,
                 sort_keys=True,

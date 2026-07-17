@@ -4,7 +4,7 @@ Decision-support research for a simulated university trading competition running
 
 ## Current status
 
-Architecture and staged implementation planning are complete. Stage 2 now uses a credential-gated Alpaca historical-bars adapter as the primary market-data path for a bounded real sample. It supports a three-stock, one-month minute-bar request, daily bars, local `.env` credentials, immutable content-addressed raw responses, hash-verified request caching, retry/pacing controls, normalization into the existing provider-neutral schema, and fail-closed quality reporting. It has not been run against real data in this repository because no credential is present. Synthetic data remains only as a deterministic offline regression fixture. The validator rejects every current model for promotion because fixtures cannot establish empirical performance and the real-data path still lacks survivorship-safe identities, independently verified catalysts, quote-derived costs, and halt/fill evidence. No return claim, live platform coverage, or production readiness is asserted.
+Architecture and staged implementation planning are complete. Stage 2 now uses a credential-gated Alpaca historical-bars adapter as the primary market-data path for a bounded real sample. The first three-stock, one-month IEX sample was retrieved on 17 July 2026 and passed raw/normalized reconciliation, but it remains blocked by 340 unobserved JPM minute intervals plus missing quote, halt, float, reference, and survivorship-safe universe data. The adapter supports daily bars, local `.env` credentials for retrieval, credential-free cache-only validation, immutable content-addressed raw responses, hash-verified request caching, retry/pacing controls, normalization into the existing provider-neutral schema, and fail-closed quality reporting. Synthetic data remains only as a deterministic offline regression fixture. No model is promoted and no return claim, live platform coverage, or production readiness is asserted.
 
 The initial deliverables are:
 
@@ -102,6 +102,18 @@ In `.env`, fill only `ALPACA_API_KEY_ID` and `ALPACA_API_SECRET_KEY`; do not add
 
 The command exits with status `2` after writing available diagnostics when authentication, retrieval, normalization, reconciliation, or quality checks fail. It never silently converts a failed check into a successful run, and no modelling command consumes this output automatically. Review [Alpaca historical Stage 2 adapter](docs/ALPACA_HISTORICAL.md) before using or retaining provider data.
 
+Revalidate exact cached responses without reading `.env` or allowing network fallback:
+
+```bash
+alpaca-historical-quality \
+  --cache-only \
+  --config config/alpaca_historical.sample.json \
+  --output-dir output/alpaca_historical_quality \
+  --repo-root .
+```
+
+The first real-data audit and its remaining blockers are documented in [the 17 July Alpaca quality audit](reports/ALPACA_HISTORICAL_QUALITY_AUDIT_20260717.md).
+
 ## Non-negotiable constraints
 
 - Decision support only: no broker order endpoints and no automatic execution.
@@ -119,4 +131,4 @@ Python 3.12, Parquet plus DuckDB for local analytical storage, scikit-learn base
 
 ## Credentials
 
-No credentials are required for the planning stage or deterministic engineering fixtures. A free market-data API credential becomes genuinely required in Stage 2 to run the first real historical minute-bar sample. A consolidated real-time SIP entitlement is strongly recommended before competition shadow operation; free IEX-only live data is incomplete for a Nasdaq/NYSE low-float scanner.
+No credentials are required for planning, deterministic engineering fixtures, or exact cache-only revalidation. A legitimate market-data credential is required for a new historical retrieval. A consolidated real-time SIP entitlement is strongly recommended before competition shadow operation; free IEX-only live data is incomplete for a Nasdaq/NYSE low-float scanner.

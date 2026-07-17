@@ -14,6 +14,7 @@ The implemented standard-library market-data slice refines this contract in `src
 | `published_at` | Source-declared publication time; nullable |
 | `first_seen_at` | Earliest observation by this system |
 | `ingested_at` | Persistence time for this version |
+| `validated_at` | Time a quality policy was applied; distinct from provider retrieval time |
 | `available_at` | Conservative earliest time allowed in features |
 | `source_uri` | Canonical link or request identifier with secrets removed |
 | `content_hash` | Hash of immutable raw content or normalized source payload |
@@ -29,6 +30,10 @@ The Alpaca Stage 2 adapter stores the exact response bytes by SHA-256 under igno
 Each successful cache record stores its schema/adapter version, provider, licence class, exact credential-free request URL, timeframe, original provider-retrieval time, response SHA-256, and repository-confined paths to the content-addressed response and raw manifest. Cache records are immutable; reuse is bounded by configured age and requires all hashes and identities to reconcile. Error responses are never cached.
 
 The ingestion audit records total raw/cache artifact uses, actual network requests, cache hits, accepted pages, raw and normalized minute/daily row counts, explicitly session-filtered minute rows, reconciliation status, and every artifact reference. `cache_hit` is run-specific audit metadata; it never changes the original provider retrieval timestamp.
+
+### `historical_quality_run`
+
+The immutable run manifest stores provider `retrieved_at`, separate `validated_at`, `cache_only`, config and output hashes, network/cache counts, normalized row counts, reconciliation status, quality counts, and explicit flags confirming that no training, prediction, profitability claim, or trading endpoint was used. For sparse trade-derived bars, `UNOBSERVED_TRADE_BAR_INTERVALS` is an error range: it does not assert that the vendor lost data, and it cannot be resolved without eligible-trade, quote, or halt evidence.
 
 ## `security_master_scd`
 

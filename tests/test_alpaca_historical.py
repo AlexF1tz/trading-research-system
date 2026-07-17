@@ -211,7 +211,8 @@ class AlpacaHistoricalTests(unittest.TestCase):
             empty_transport = FakeTransport([])
             second = AlpacaHistoricalProvider(
                 value,
-                AlpacaCredentials("key", "secret"),
+                None,
+                cache_only=True,
                 transport=empty_transport,
                 clock=lambda: NOW + timedelta(hours=1),
                 sleeper=lambda _: None,
@@ -225,6 +226,21 @@ class AlpacaHistoricalTests(unittest.TestCase):
             self.assertEqual(second.audit.network_requests, 0)
             self.assertEqual(second.audit.cache_hits, 3)
             self.assertTrue(all(item.cache_hit for item in second.audit.artifacts))
+
+    def test_cache_only_miss_fails_before_transport_or_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            empty_transport = FakeTransport([])
+            provider = AlpacaHistoricalProvider(
+                config(Path(directory) / "raw"),
+                None,
+                cache_only=True,
+                transport=empty_transport,
+                clock=lambda: NOW,
+                sleeper=lambda _: None,
+            )
+            with self.assertRaisesRegex(AlpacaRequestError, "cache-only run"):
+                provider.load()
+            self.assertEqual(empty_transport.calls, [])
 
     def test_corrupted_cached_response_fails_closed_without_network(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -457,6 +473,8 @@ class AlpacaHistoricalTests(unittest.TestCase):
             self.assertFalse(summary["training_performed"])
             self.assertFalse(summary["predictions_generated"])
             self.assertFalse(summary["profitability_claimed"])
+            self.assertFalse(summary["cache_only"])
+            self.assertEqual(summary["validated_at"], NOW)
             self.assertEqual(summary["network_requests"], 3)
             self.assertEqual(summary["cache_hits"], 0)
             self.assertRegex(str(summary["config_file_sha256"]), r"^[0-9a-f]{64}$")
@@ -464,18 +482,38 @@ class AlpacaHistoricalTests(unittest.TestCase):
             run_dir = Path(str(summary["run_directory"]))
             self.assertTrue((run_dir / "run_manifest.json").exists())
             self.assertTrue((run_dir / "normalized" / "bars_1m.jsonl").exists())
+            quality_text = (run_dir / "quality_report.json").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("UNOBSERVED_TRADE_BAR_INTERVALS", quality_text)
+            self.assertNotIn('"code": "MISSING_BARS"', quality_text)
+
+            cached = run_historical_quality_check(
+                config_path,
+                root / "output",
+                root,
+                environment=None,
+                transport=FakeTransport([]),
+                clock=lambda: NOW + timedelta(hours=1),
+                sleeper=lambda _: None,
+                cache_only=True,
+            )
+            self.assertTrue(cached["cache_only"])
+            self.assertEqual(cached["network_requests"], 0)
+            self.assertEqual(cached["cache_hits"], 3)
+            self.assertEqual(cached["retrieved_at"], summary["retrieved_at"])
+            self.assertEqual(cached["validated_at"], NOW + timedelta(hours=1))
+            self.assertNotEqual(cached["run_directory"], summary["run_directory"])
             with self.assertRaisesRegex(RuntimeError, "refusing to overwrite"):
                 run_historical_quality_check(
                     config_path,
                     root / "output",
                     root,
-                    environment={
-                        "ALPACA_API_KEY_ID": "key",
-                        "ALPACA_API_SECRET_KEY": "secret",
-                    },
-                    transport=paginated_transport(),
-                    clock=lambda: NOW,
+                    environment=None,
+                    transport=FakeTransport([]),
+                    clock=lambda: NOW + timedelta(hours=1),
                     sleeper=lambda _: None,
+                    cache_only=True,
                 )
 
     def test_cli_fails_closed_before_network_when_credentials_missing(self) -> None:
@@ -493,6 +531,25 @@ class AlpacaHistoricalTests(unittest.TestCase):
                 )
         self.assertEqual(code, 2)
         self.assertIn("ALPACA_API_KEY_ID", error.getvalue())
+
+    def test_cli_cache_only_does_not_load_environment_file(self) -> None:
+        summary = {
+            "cache_only": True,
+            "quality_errors": 1,
+            "training_performed": False,
+            "profitability_claimed": False,
+        }
+        with mock.patch(
+            "equity_research.market_data.historical_quality.load_environment_file",
+            side_effect=AssertionError("dotenv must not be read"),
+        ), mock.patch(
+            "equity_research.market_data.historical_quality.run_historical_quality_check",
+            return_value=summary,
+        ) as runner, contextlib.redirect_stdout(io.StringIO()):
+            code = main(["--cache-only"])
+        self.assertEqual(code, 2)
+        self.assertTrue(runner.call_args.kwargs["cache_only"])
+        self.assertIsNone(runner.call_args.kwargs["environment"])
 
 
 if __name__ == "__main__":

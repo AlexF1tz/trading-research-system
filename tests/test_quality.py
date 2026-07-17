@@ -17,7 +17,12 @@ from equity_research.market_data.contracts import (
     Session,
     Timeframe,
 )
-from equity_research.market_data.quality import QualityConfig, run_quality_checks
+from equity_research.market_data.quality import (
+    BarGapPolicy,
+    QualityConfig,
+    Severity,
+    run_quality_checks,
+)
 
 
 UTC = timezone.utc
@@ -120,6 +125,27 @@ class QualityTests(unittest.TestCase):
         bars = (minute_bar(self.open), minute_bar(self.open + timedelta(minutes=2)))
         value = dataset(bars, expected=("X",), dates=(SESSION_DATE,))
         self.assertIn("MISSING_BARS", self.codes(value, calendar))
+
+    def test_trade_aggregate_gap_remains_an_error_with_precise_semantics(self) -> None:
+        calendar = UsEquityCalendar(early_closes={SESSION_DATE: time(9, 33)})
+        bars = (minute_bar(self.open), minute_bar(self.open + timedelta(minutes=2)))
+        value = dataset(bars, expected=("X",), dates=(SESSION_DATE,))
+        issues = run_quality_checks(
+            value,
+            calendar,
+            replace(
+                self.config,
+                bar_gap_policy=BarGapPolicy.TRADE_AGGREGATE,
+            ),
+        )
+        gap = next(
+            issue
+            for issue in issues
+            if issue.code == "UNOBSERVED_TRADE_BAR_INTERVALS"
+        )
+        self.assertIs(gap.severity, Severity.ERROR)
+        self.assertIn("without eligible-trade, quote, or halt evidence", gap.message)
+        self.assertNotIn("MISSING_BARS", {issue.code for issue in issues})
 
     def test_timezone_price_and_volume_errors(self) -> None:
         non_utc = datetime(
