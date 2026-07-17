@@ -42,7 +42,7 @@ Gate:
 
 ## Stage 2 — real source ingestion and historical sample (18–21 July)
 
-Implementation status on 16 July 2026: the bounded Alpaca historical-bars slice is implemented with environment-only credentials, a GET-only market-data endpoint allowlist, minute/daily pagination, pacing and retry handling, immutable content-addressed raw responses, normalized existing contracts, reconciliation, and a quality-only CLI. Offline transport tests pass. Stage 2 is **not complete**: no credentialed run has occurred, and SEC, Nasdaq symbol/halt, FINRA, effective-dated reference, corporate-action, quote, and survivorship-safe delisting coverage remain outstanding.
+Implementation status on 17 July 2026: the bounded Alpaca historical-bars slice is implemented with process-environment or ignored `.env` credentials, a GET-only market-data endpoint allowlist, a reviewed three-stock/one-month minute-bar configuration, minute/daily pagination, pacing and retry handling, immutable content-addressed raw responses, hash-verified append-only request caching, normalized existing contracts, reconciliation, and a quality-only CLI. Offline transport/cache tests pass. Stage 2 is **not complete**: no credentialed run has occurred, and SEC, Nasdaq symbol/halt, FINRA, effective-dated reference, corporate-action, quote, and survivorship-safe delisting coverage remain outstanding.
 
 Build:
 

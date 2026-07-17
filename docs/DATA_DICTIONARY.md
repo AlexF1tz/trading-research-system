@@ -22,7 +22,13 @@ The implemented standard-library market-data slice refines this contract in `src
 
 ### `raw_http_response` and `raw_request_manifest`
 
-The Alpaca Stage 2 adapter stores the exact response bytes by SHA-256 under ignored local data storage. A separate immutable request manifest records request URL without credentials, market-data adapter version, timeframe, attempt number, HTTP status, retrieval time, response hash/size, and allowlisted request/rate-limit response headers. Credential header names may be recorded; credential values never are. Retry/error responses are preserved as well as successful pages.
+The Alpaca Stage 2 adapter stores the exact response bytes by SHA-256 under ignored local data storage. A separate immutable request manifest records provider, licence class, request URL without credentials, market-data adapter version, timeframe, attempt number, HTTP status, retrieval time, response hash/size, and allowlisted request/rate-limit response headers. Credential header names may be recorded; credential values never are. Retry/error responses are preserved as well as successful pages.
+
+### `raw_request_cache_record` and `ingestion_audit`
+
+Each successful cache record stores its schema/adapter version, provider, licence class, exact credential-free request URL, timeframe, original provider-retrieval time, response SHA-256, and repository-confined paths to the content-addressed response and raw manifest. Cache records are immutable; reuse is bounded by configured age and requires all hashes and identities to reconcile. Error responses are never cached.
+
+The ingestion audit records total raw/cache artifact uses, actual network requests, cache hits, accepted pages, raw and normalized minute/daily row counts, explicitly session-filtered minute rows, reconciliation status, and every artifact reference. `cache_hit` is run-specific audit metadata; it never changes the original provider retrieval timestamp.
 
 ## `security_master_scd`
 

@@ -18,15 +18,35 @@
     }
   ],
   "minute_range": {
-    "start": "2026-07-10T08:00:00Z",
-    "end": "2026-07-11T00:00:00Z",
+    "start": "2026-06-01T08:00:00Z",
+    "end": "2026-07-01T00:00:00Z",
     "session_dates": [
-      "2026-07-10"
+      "2026-06-01",
+      "2026-06-02",
+      "2026-06-03",
+      "2026-06-04",
+      "2026-06-05",
+      "2026-06-08",
+      "2026-06-09",
+      "2026-06-10",
+      "2026-06-11",
+      "2026-06-12",
+      "2026-06-15",
+      "2026-06-16",
+      "2026-06-17",
+      "2026-06-18",
+      "2026-06-22",
+      "2026-06-23",
+      "2026-06-24",
+      "2026-06-25",
+      "2026-06-26",
+      "2026-06-29",
+      "2026-06-30"
     ]
   },
   "daily_range": {
-    "start": "2026-06-01T00:00:00Z",
-    "end": "2026-07-11T00:00:00Z"
+    "start": "2026-05-01T00:00:00Z",
+    "end": "2026-07-01T00:00:00Z"
   },
   "included_sessions": [
     "regular"
@@ -38,6 +58,10 @@
   "timeout_seconds": 30,
   "minimum_historical_lag_minutes": 15,
   "raw_root": "data/raw/alpaca",
+  "cache": {
+    "enabled": true,
+    "max_age_hours": 24
+  },
   "license_class": "alpaca_personal_noncommercial_research_review_required",
   "rate_limit": {
     "minimum_request_interval_seconds": 0.35,

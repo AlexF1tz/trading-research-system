@@ -4,7 +4,7 @@ Decision-support research for a simulated university trading competition running
 
 ## Current status
 
-Architecture and staged implementation planning are complete. Provider-neutral market-data, catalyst-intelligence, retail-attention, quantitative-modelling, and independent-validation engineering slices are implemented with explicitly synthetic fixtures, replaceable normalized-input interfaces, and fail-closed quality checks. A bounded credential-gated Alpaca historical-bars adapter is implemented but has not been run against real data in this repository. The validator rejects every current model for promotion because the fixture cannot establish empirical performance and lacks survivorship-safe identities, independently verified announcement times, revision lineage, and realistic halt/fill evidence. No return claim, live platform coverage, or production readiness is asserted. The repository was empty when planning began on 16 July 2026.
+Architecture and staged implementation planning are complete. Stage 2 now uses a credential-gated Alpaca historical-bars adapter as the primary market-data path for a bounded real sample. It supports a three-stock, one-month minute-bar request, daily bars, local `.env` credentials, immutable content-addressed raw responses, hash-verified request caching, retry/pacing controls, normalization into the existing provider-neutral schema, and fail-closed quality reporting. It has not been run against real data in this repository because no credential is present. Synthetic data remains only as a deterministic offline regression fixture. The validator rejects every current model for promotion because fixtures cannot establish empirical performance and the real-data path still lacks survivorship-safe identities, independently verified catalysts, quote-derived costs, and halt/fill evidence. No return claim, live platform coverage, or production readiness is asserted.
 
 The initial deliverables are:
 
@@ -21,9 +21,9 @@ The initial deliverables are:
 - [Current validation report](reports/VALIDATION_REPORT.md)
 - [Alpaca historical Stage 2 adapter](docs/ALPACA_HISTORICAL.md)
 
-## Market-data sample
+## Offline market-data regression fixture
 
-The sample requires no API key and no third-party runtime dependency. Its values are deterministic synthetic fixtures and must never be presented as historical market observations.
+This test-only fixture requires no API key or third-party runtime dependency. Its values are deterministic and must never be presented as historical market observations or used to train a production candidate model.
 
 ```powershell
 python -m pip install -e .
@@ -75,9 +75,9 @@ The current run reproduces 2,247 metric values exactly within tolerance but stil
 
 ## Real historical data quality check — Stage 2
 
-The Stage 2 command uses Alpaca's historical **market-data** endpoint only. It performs credentialed GET requests for a bounded three-stock sample, preserves each raw response and request manifest under ignored `data/raw/`, normalizes minute and daily bars into the existing provider-neutral schema, and writes an immutable timestamped quality run. It does not call account, order, position, or broker endpoints; it does not train a model or generate predictions.
+The Stage 2 command uses Alpaca's historical **market-data** endpoint only. It performs credentialed GET requests for a bounded three-stock sample, preserves each raw response and request manifest under ignored `data/raw/`, normalizes minute and daily bars into the existing provider-neutral schema, and writes an immutable timestamped quality run. Successful responses are cached for 24 hours by default; every cache hit is tied to the exact request URL and verified against the preserved response hash before reuse. It does not call account, order, position, or broker endpoints; it does not train a model or generate predictions.
 
-The sample configuration uses the free IEX feed for AAPL, MSFT, and JPM, one minute-bar session on 10 July 2026, and a forty-day daily-bar window. IEX is single-venue data, so the result is deliberately marked incomplete and cannot support full-market volume, spread, liquidity, survivorship, or profitability claims.
+The sample configuration uses the IEX feed for AAPL, MSFT, and JPM, all 21 regular trading-session dates from 1–30 June 2026, and a covering daily-bar window from 1 May through 30 June. Juneteenth (19 June) is excluded explicitly. IEX is single-venue data, so the result is deliberately marked incomplete and cannot support full-market volume, spread, liquidity, survivorship, or profitability claims. The repository's zero-dependency calendar is not authoritative; the explicit session list must be reviewed before changing the date range.
 
 Exact setup from the repository root in Git Bash on Windows:
 
@@ -86,23 +86,21 @@ python -m venv .venv
 source .venv/Scripts/activate
 python -m pip install --upgrade pip
 python -m pip install -e .
-
-read -r -p "Alpaca API key ID: " ALPACA_API_KEY_ID
-read -r -s -p "Alpaca API secret key: " ALPACA_API_SECRET_KEY
-printf '\n'
-export ALPACA_API_KEY_ID ALPACA_API_SECRET_KEY
+python -m unittest discover -s tests
+cp .env.example .env
+chmod 600 .env
+notepad .env
 
 alpaca-historical-quality \
   --config config/alpaca_historical.sample.json \
   --output-dir output/alpaca_historical_quality \
-  --repo-root .
-
-status=$?
-unset ALPACA_API_KEY_ID ALPACA_API_SECRET_KEY
-test "$status" -eq 0
+  --repo-root . \
+  --env-file .env
 ```
 
-The command exits with status `2` after writing available diagnostics when authentication, retrieval, normalization, reconciliation, or quality checks fail. It never silently converts a failed check into a successful run. Review [Alpaca historical Stage 2 adapter](docs/ALPACA_HISTORICAL.md) before using or retaining provider data.
+In `.env`, fill only `ALPACA_API_KEY_ID` and `ALPACA_API_SECRET_KEY`; do not add broker-account credentials. Process-environment values override `.env` values. The loader does not interpolate variables, does not mutate the process environment, and never writes credential values to artifacts.
+
+The command exits with status `2` after writing available diagnostics when authentication, retrieval, normalization, reconciliation, or quality checks fail. It never silently converts a failed check into a successful run, and no modelling command consumes this output automatically. Review [Alpaca historical Stage 2 adapter](docs/ALPACA_HISTORICAL.md) before using or retaining provider data.
 
 ## Non-negotiable constraints
 

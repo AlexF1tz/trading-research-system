@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import tempfile
 import unittest
 from dataclasses import replace
@@ -17,12 +18,15 @@ from equity_research.market_data.alpaca import (
     AlpacaCredentials,
     AlpacaHistoricalConfig,
     AlpacaHistoricalProvider,
+    AlpacaRequestError,
     ConfiguredSecurity,
     HttpResponse,
     UrllibReadOnlyTransport,
 )
 from equity_research.market_data.contracts import Exchange, Session
 from equity_research.market_data.historical_quality import (
+    load_environment_file,
+    load_historical_config,
     main,
     run_historical_quality_check,
 )
@@ -33,7 +37,7 @@ NOW = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
 
 
 class FakeTransport:
-    def __init__(self, responses: list[HttpResponse]) -> None:
+    def __init__(self, responses: list[HttpResponse | Exception]) -> None:
         self.responses = responses
         self.calls: list[tuple[str, dict[str, str], float]] = []
 
@@ -41,7 +45,10 @@ class FakeTransport:
         self.calls.append((url, dict(headers), timeout_seconds))
         if not self.responses:
             raise AssertionError("unexpected HTTP call")
-        return self.responses.pop(0)
+        result = self.responses.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
 
 
 def response(payload: object, status: int = 200, **headers: str) -> HttpResponse:
@@ -155,6 +162,8 @@ class AlpacaHistoricalTests(unittest.TestCase):
             self.assertEqual(len(dataset.daily_bars), 2)
             self.assertTrue(provider.audit.reconciled)
             self.assertEqual(provider.audit.requests, 3)
+            self.assertEqual(provider.audit.network_requests, 3)
+            self.assertEqual(provider.audit.cache_hits, 0)
             self.assertEqual(provider.audit.accepted_pages, 3)
             self.assertEqual(
                 dataset.one_minute_bars[0].available_at,
@@ -180,6 +189,68 @@ class AlpacaHistoricalTests(unittest.TestCase):
                 self.assertNotIn("test-key", manifest_text)
                 self.assertNotIn("test-secret", manifest_text)
                 self.assertIn('"credential_values_persisted": false', manifest_text)
+                self.assertIn(
+                    '"license_class": "alpaca_personal_noncommercial_research_review_required"',
+                    manifest_text,
+                )
+
+    def test_successful_responses_are_reused_from_hash_verified_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            value = config(root / "raw")
+            first_transport = paginated_transport()
+            first = AlpacaHistoricalProvider(
+                value,
+                AlpacaCredentials("key", "secret"),
+                transport=first_transport,
+                clock=lambda: NOW,
+                sleeper=lambda _: None,
+            )
+            first_dataset = first.load()
+
+            empty_transport = FakeTransport([])
+            second = AlpacaHistoricalProvider(
+                value,
+                AlpacaCredentials("key", "secret"),
+                transport=empty_transport,
+                clock=lambda: NOW + timedelta(hours=1),
+                sleeper=lambda _: None,
+            )
+            second_dataset = second.load()
+
+            self.assertEqual(first_dataset.one_minute_bars, second_dataset.one_minute_bars)
+            self.assertEqual(first_dataset.daily_bars, second_dataset.daily_bars)
+            self.assertEqual(empty_transport.calls, [])
+            self.assertEqual(second.audit.requests, 3)
+            self.assertEqual(second.audit.network_requests, 0)
+            self.assertEqual(second.audit.cache_hits, 3)
+            self.assertTrue(all(item.cache_hit for item in second.audit.artifacts))
+
+    def test_corrupted_cached_response_fails_closed_without_network(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            value = config(root / "raw")
+            first = AlpacaHistoricalProvider(
+                value,
+                AlpacaCredentials("key", "secret"),
+                transport=paginated_transport(),
+                clock=lambda: NOW,
+                sleeper=lambda _: None,
+            )
+            first.load()
+            Path(first.audit.artifacts[0].response_path).write_bytes(b"corrupt")
+
+            empty_transport = FakeTransport([])
+            second = AlpacaHistoricalProvider(
+                value,
+                AlpacaCredentials("key", "secret"),
+                transport=empty_transport,
+                clock=lambda: NOW + timedelta(hours=1),
+                sleeper=lambda _: None,
+            )
+            with self.assertRaisesRegex(RuntimeError, "hash mismatch"):
+                second.load()
+            self.assertEqual(empty_transport.calls, [])
 
     def test_rate_limit_retry_honours_retry_after(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -221,15 +292,55 @@ class AlpacaHistoricalTests(unittest.TestCase):
             provider.load()
             self.assertIn(2.0, sleeps)
             self.assertEqual(provider.audit.requests, 3)
+            self.assertEqual(provider.audit.network_requests, 3)
             self.assertEqual(provider.audit.artifacts[0].status, 429)
+
+    def test_transient_connection_failure_is_retried_without_fabricated_raw_data(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            transport = FakeTransport(
+                [
+                    AlpacaRequestError("temporary connection failure"),
+                    response(
+                        {
+                            "bars": {
+                                "AAPL": [bar("2026-07-15T13:30:00Z")],
+                                "JPM": [bar("2026-07-15T13:30:00Z")],
+                            },
+                            "next_page_token": None,
+                        }
+                    ),
+                    response(
+                        {
+                            "bars": {
+                                "AAPL": [bar("2026-07-15T04:00:00Z")],
+                                "JPM": [bar("2026-07-15T04:00:00Z")],
+                            },
+                            "next_page_token": None,
+                        }
+                    ),
+                ]
+            )
+            sleeps: list[float] = []
+            provider = AlpacaHistoricalProvider(
+                config(Path(directory) / "raw"),
+                AlpacaCredentials("key", "secret"),
+                transport=transport,
+                clock=lambda: NOW,
+                sleeper=sleeps.append,
+            )
+            provider.load()
+            self.assertIn(1.0, sleeps)
+            self.assertEqual(provider.audit.network_requests, 3)
+            self.assertEqual(provider.audit.requests, 2)
+            self.assertEqual(len(provider.audit.artifacts), 2)
 
     def test_config_rejects_unbounded_ranges_and_large_universe(self) -> None:
         value = config(Path("raw"))
         too_long = replace(
             value,
-            minute_end=value.minute_start + timedelta(days=6),
+            minute_end=value.minute_start + timedelta(days=32),
         )
-        with self.assertRaisesRegex(AlpacaConfigurationError, "five days"):
+        with self.assertRaisesRegex(AlpacaConfigurationError, "thirty-one days"):
             too_long.validate(NOW)
         too_many = replace(
             value,
@@ -240,6 +351,51 @@ class AlpacaHistoricalTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(AlpacaConfigurationError, "one to ten"):
             too_many.validate(NOW)
+
+    def test_sample_config_is_three_stocks_and_one_month_of_sessions(self) -> None:
+        value = load_historical_config(
+            Path("config/alpaca_historical.sample.json"), Path(".")
+        )
+        value.validate(NOW)
+        self.assertEqual([item.ticker for item in value.universe], ["AAPL", "MSFT", "JPM"])
+        self.assertEqual(len(value.minute_session_dates), 21)
+        self.assertEqual(value.minute_start, datetime(2026, 6, 1, 8, 0, tzinfo=UTC))
+        self.assertEqual(value.minute_end, datetime(2026, 7, 1, 0, 0, tzinfo=UTC))
+        self.assertTrue(value.cache_enabled)
+        self.assertEqual(value.cache_max_age_hours, 24.0)
+
+    def test_dotenv_loading_is_local_non_mutating_and_process_env_wins(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            env_path = Path(directory) / ".env"
+            env_path.write_text(
+                "# local only\n"
+                "ALPACA_API_KEY_ID=file-key\n"
+                "export ALPACA_API_SECRET_KEY='file-secret'\n",
+                encoding="utf-8",
+            )
+            before = dict(os.environ)
+            loaded = load_environment_file(
+                env_path, {"ALPACA_API_KEY_ID": "process-key"}
+            )
+            self.assertEqual(loaded["ALPACA_API_KEY_ID"], "process-key")
+            self.assertEqual(loaded["ALPACA_API_SECRET_KEY"], "file-secret")
+            self.assertEqual(dict(os.environ), before)
+
+    def test_credentials_are_rejected_anywhere_in_json_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            raw = json.loads(
+                Path("config/alpaca_historical.sample.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            raw["cache"]["api_key"] = "must-not-be-accepted"
+            config_path = root / "alpaca.json"
+            config_path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(
+                AlpacaConfigurationError, "credentials must come from environment"
+            ):
+                load_historical_config(config_path, root)
 
     def test_quality_command_writes_no_model_or_profit_claim(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -279,6 +435,7 @@ class AlpacaHistoricalTests(unittest.TestCase):
                             "max_attempts": 2,
                             "max_retry_delay_seconds": 0,
                         },
+                        "cache": {"enabled": True, "max_age_hours": 24},
                     }
                 ),
                 encoding="utf-8",
@@ -300,6 +457,9 @@ class AlpacaHistoricalTests(unittest.TestCase):
             self.assertFalse(summary["training_performed"])
             self.assertFalse(summary["predictions_generated"])
             self.assertFalse(summary["profitability_claimed"])
+            self.assertEqual(summary["network_requests"], 3)
+            self.assertEqual(summary["cache_hits"], 0)
+            self.assertRegex(str(summary["config_file_sha256"]), r"^[0-9a-f]{64}$")
             self.assertGreater(summary["quality_errors"], 0)
             run_dir = Path(str(summary["run_directory"]))
             self.assertTrue((run_dir / "run_manifest.json").exists())
@@ -327,6 +487,8 @@ class AlpacaHistoricalTests(unittest.TestCase):
                         "config/alpaca_historical.sample.json",
                         "--output-dir",
                         "output/unused",
+                        "--env-file",
+                        "output/definitely-missing.env",
                     ]
                 )
         self.assertEqual(code, 2)

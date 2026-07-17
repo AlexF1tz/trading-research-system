@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
+import re
 import sys
 from dataclasses import asdict, is_dataclass
 from datetime import date, datetime
@@ -29,6 +31,9 @@ from .provider import parse_timestamp
 from .quality import QualityConfig, QualityIssue, Severity, run_quality_checks
 
 
+_ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -47,7 +52,72 @@ def _parser() -> argparse.ArgumentParser:
         default=Path("output/alpaca_historical_quality"),
     )
     parser.add_argument("--repo-root", type=Path, default=Path("."))
+    parser.add_argument(
+        "--env-file",
+        type=Path,
+        default=Path(".env"),
+        help=(
+            "optional local dotenv file; process environment values take precedence "
+            "and values are never persisted"
+        ),
+    )
     return parser
+
+
+def load_environment_file(
+    path: Path,
+    process_environment: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """Load a minimal, non-interpolating dotenv file without mutating os.environ."""
+
+    merged = dict(
+        process_environment if process_environment is not None else os.environ
+    )
+    if not path.exists():
+        return merged
+    if not path.is_file():
+        raise AlpacaConfigurationError(f"env path is not a file: {path}")
+    parsed: dict[str, str] = {}
+    for line_number, original in enumerate(
+        path.read_text(encoding="utf-8-sig").splitlines(), start=1
+    ):
+        line = original.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        if "=" not in line:
+            raise AlpacaConfigurationError(
+                f"invalid dotenv assignment at {path}:{line_number}"
+            )
+        name, raw_value = line.split("=", 1)
+        name = name.strip()
+        if not _ENV_NAME.fullmatch(name):
+            raise AlpacaConfigurationError(
+                f"invalid dotenv variable name at {path}:{line_number}"
+            )
+        if name in parsed:
+            raise AlpacaConfigurationError(
+                f"duplicate dotenv variable {name} at {path}:{line_number}"
+            )
+        raw_value = raw_value.strip()
+        if raw_value.startswith(("'", '"')):
+            quote = raw_value[0]
+            if len(raw_value) < 2 or raw_value[-1] != quote:
+                raise AlpacaConfigurationError(
+                    f"unterminated dotenv quote at {path}:{line_number}"
+                )
+            value = raw_value[1:-1]
+        else:
+            value = raw_value
+        if "\x00" in value:
+            raise AlpacaConfigurationError(
+                f"dotenv value contains a null byte at {path}:{line_number}"
+            )
+        parsed[name] = value
+    for name, value in parsed.items():
+        merged.setdefault(name, value)
+    return merged
 
 
 def _load_json(path: Path) -> dict[str, object]:
@@ -61,10 +131,23 @@ def _load_json(path: Path) -> dict[str, object]:
         "api_secret",
         "key_id",
         "secret_key",
-        "ALPACA_API_KEY_ID",
-        "ALPACA_API_SECRET_KEY",
+        "alpaca_api_key_id",
+        "alpaca_api_secret_key",
     }
-    present = forbidden.intersection(value)
+    present: set[str] = set()
+
+    def find_forbidden(item: object) -> None:
+        if isinstance(item, dict):
+            for key, child in item.items():
+                normalized = str(key).lower()
+                if normalized in forbidden:
+                    present.add(str(key))
+                find_forbidden(child)
+        elif isinstance(item, list):
+            for child in item:
+                find_forbidden(child)
+
+    find_forbidden(value)
     if present:
         raise AlpacaConfigurationError(
             "credentials must come from environment variables, not config: "
@@ -124,6 +207,12 @@ def load_historical_config(path: Path, repo_root: Path) -> AlpacaHistoricalConfi
     rate = raw.get("rate_limit", {})
     if not isinstance(rate, dict):
         raise AlpacaConfigurationError("rate_limit must be an object")
+    cache = raw.get("cache", {})
+    if not isinstance(cache, dict):
+        raise AlpacaConfigurationError("cache must be an object")
+    cache_enabled = cache.get("enabled", True)
+    if not isinstance(cache_enabled, bool):
+        raise AlpacaConfigurationError("cache.enabled must be true or false")
     try:
         return AlpacaHistoricalConfig(
             universe=tuple(universe),
@@ -149,6 +238,8 @@ def load_historical_config(path: Path, repo_root: Path) -> AlpacaHistoricalConfi
                 raw.get("minimum_historical_lag_minutes", 15)
             ),
             raw_root=resolved_raw_root,
+            cache_enabled=cache_enabled,
+            cache_max_age_hours=float(cache.get("max_age_hours", 24.0)),
             license_class=str(
                 raw.get(
                     "license_class",
@@ -228,6 +319,7 @@ def write_quality_artifacts(
     dataset: ProviderDataset,
     provider: AlpacaHistoricalProvider,
     issues: tuple[QualityIssue, ...],
+    config_sha256: str,
 ) -> dict[str, object]:
     run_dir = _run_directory(output_root, dataset.coverage.retrieved_at)
     normalized = run_dir / "normalized"
@@ -269,6 +361,9 @@ def write_quality_artifacts(
         "provider": dataset.coverage.provider,
         "dataset_kind": dataset.coverage.dataset_kind,
         "retrieved_at": dataset.coverage.retrieved_at,
+        "config_file_sha256": config_sha256,
+        "network_requests": provider.audit.network_requests,
+        "cache_hits": provider.audit.cache_hits,
         "instruments": len(dataset.instruments),
         "one_minute_bars": len(dataset.one_minute_bars),
         "daily_bars": len(dataset.daily_bars),
@@ -300,7 +395,13 @@ def run_historical_quality_check(
     monotonic: Callable[[], float] | None = None,
     sleeper: Callable[[float], None] | None = None,
 ) -> dict[str, object]:
+    config_bytes = config_path.read_bytes()
+    config_sha256 = hashlib.sha256(config_bytes).hexdigest()
     config = load_historical_config(config_path, repo_root)
+    if config_path.read_bytes() != config_bytes:
+        raise AlpacaConfigurationError(
+            "historical config changed while the run was starting"
+        )
     credentials = AlpacaCredentials.from_environment(environment)
     provider = AlpacaHistoricalProvider(
         config,
@@ -323,14 +424,24 @@ def run_historical_quality_check(
             split_tolerance=float(quality_raw.get("split_tolerance", 0.12)),
         ),
     ) + _reconciliation_issues(provider)
-    return write_quality_artifacts(output_root, dataset, provider, issues)
+    if config_path.read_bytes() != config_bytes:
+        raise AlpacaConfigurationError(
+            "historical config changed during the quality run"
+        )
+    return write_quality_artifacts(
+        output_root, dataset, provider, issues, config_sha256
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        environment = load_environment_file(args.env_file)
         summary = run_historical_quality_check(
-            args.config, args.output_dir, args.repo_root
+            args.config,
+            args.output_dir,
+            args.repo_root,
+            environment=environment,
         )
     except (
         AlpacaConfigurationError,

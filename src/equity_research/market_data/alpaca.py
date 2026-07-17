@@ -34,7 +34,8 @@ from .provider import parse_timestamp
 ALPACA_DATA_BASE_URL = "https://data.alpaca.markets"
 ALPACA_BARS_PATH = "/v2/stocks/bars"
 ALPACA_BARS_URL = f"{ALPACA_DATA_BASE_URL}{ALPACA_BARS_PATH}"
-ADAPTER_VERSION = "alpaca-historical-bars-v1"
+ALPACA_PROVIDER_NAME = "alpaca_market_data"
+ADAPTER_VERSION = "alpaca-historical-bars-v2"
 RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
 SAFE_RESPONSE_HEADERS = frozenset(
     {
@@ -122,6 +123,8 @@ class AlpacaHistoricalConfig:
     max_retry_delay_seconds: float = 30.0
     minimum_historical_lag_minutes: int = 15
     raw_root: Path = Path("data/raw/alpaca")
+    cache_enabled: bool = True
+    cache_max_age_hours: float = 24.0
     license_class: str = "alpaca_personal_noncommercial_research_review_required"
 
     def validate(self, now: datetime) -> None:
@@ -142,8 +145,8 @@ class AlpacaHistoricalConfig:
             raise AlpacaConfigurationError("minute_start must precede minute_end")
         if not self.daily_start < self.daily_end:
             raise AlpacaConfigurationError("daily_start must precede daily_end")
-        if self.minute_end - self.minute_start > timedelta(days=5):
-            raise AlpacaConfigurationError("minute range is limited to five days")
+        if self.minute_end - self.minute_start > timedelta(days=31):
+            raise AlpacaConfigurationError("minute range is limited to thirty-one days")
         if self.daily_end - self.daily_start > timedelta(days=90):
             raise AlpacaConfigurationError("daily range is limited to ninety days")
         if not (
@@ -194,9 +197,9 @@ class AlpacaHistoricalConfig:
             )
         if len(set(self.included_sessions)) != len(self.included_sessions):
             raise AlpacaConfigurationError("included_sessions cannot contain duplicates")
-        if not self.minute_session_dates or len(self.minute_session_dates) > 5:
+        if not self.minute_session_dates or len(self.minute_session_dates) > 23:
             raise AlpacaConfigurationError(
-                "one to five explicit minute_session_dates are required"
+                "one to twenty-three explicit minute_session_dates are required"
             )
         if len(set(self.minute_session_dates)) != len(self.minute_session_dates):
             raise AlpacaConfigurationError(
@@ -228,6 +231,12 @@ class AlpacaHistoricalConfig:
             raise AlpacaConfigurationError("max_attempts must be between 1 and 10")
         if self.max_retry_delay_seconds < 0:
             raise AlpacaConfigurationError("max retry delay cannot be negative")
+        if not isinstance(self.cache_enabled, bool):
+            raise AlpacaConfigurationError("cache_enabled must be true or false")
+        if not 0 < self.cache_max_age_hours <= 168:
+            raise AlpacaConfigurationError(
+                "cache_max_age_hours must be greater than zero and at most 168"
+            )
         if not self.license_class.strip():
             raise AlpacaConfigurationError("license_class is required")
 
@@ -271,6 +280,10 @@ class UrllibReadOnlyTransport:
             raise AlpacaRequestError(
                 f"read-only Alpaca market-data request failed: {exc.reason}"
             ) from exc
+        except (TimeoutError, OSError) as exc:
+            raise AlpacaRequestError(
+                "read-only Alpaca market-data request failed before a response arrived"
+            ) from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -282,6 +295,7 @@ class RawArtifact:
     request_url: str
     retrieved_at: datetime
     status: int
+    cache_hit: bool = False
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -292,12 +306,14 @@ class RawArtifact:
             "request_url": self.request_url,
             "retrieved_at": self.retrieved_at.isoformat().replace("+00:00", "Z"),
             "status": self.status,
+            "cache_hit": self.cache_hit,
         }
 
 
 class ImmutableRawStore:
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, license_class: str) -> None:
         self._root = root
+        self._license_class = license_class
 
     @staticmethod
     def _write_once(path: Path, content: bytes) -> None:
@@ -331,6 +347,8 @@ class ImmutableRawStore:
         identity = {
             "adapter_version": ADAPTER_VERSION,
             "attempt": attempt,
+            "license_class": self._license_class,
+            "provider": ALPACA_PROVIDER_NAME,
             "request_url": request_url,
             "response_sha256": response_hash,
             "retrieved_at": retrieved_at.isoformat().replace("+00:00", "Z"),
@@ -369,6 +387,189 @@ class ImmutableRawStore:
             status=response.status,
         )
 
+    def _request_cache_key(self, request_url: str, timeframe: str) -> str:
+        identity = {
+            "adapter_version": ADAPTER_VERSION,
+            "license_class": self._license_class,
+            "provider": ALPACA_PROVIDER_NAME,
+            "request_url": request_url,
+            "timeframe": timeframe,
+        }
+        return hashlib.sha256(
+            json.dumps(identity, sort_keys=True, separators=(",", ":")).encode(
+                "utf-8"
+            )
+        ).hexdigest()
+
+    def cache_success(self, artifact: RawArtifact, timeframe: str) -> None:
+        if artifact.status != 200:
+            raise RuntimeError("only successful historical responses may be cached")
+        request_cache_key = self._request_cache_key(artifact.request_url, timeframe)
+        stamp = artifact.retrieved_at.strftime("%Y%m%dT%H%M%S%fZ")
+        record = {
+            "schema_version": "alpaca-immutable-request-cache-v1",
+            "adapter_version": ADAPTER_VERSION,
+            "license_class": self._license_class,
+            "provider": ALPACA_PROVIDER_NAME,
+            "request_cache_key": request_cache_key,
+            "request_url": artifact.request_url,
+            "timeframe": timeframe,
+            "retrieved_at": artifact.retrieved_at.isoformat().replace(
+                "+00:00", "Z"
+            ),
+            "status": artifact.status,
+            "response_sha256": artifact.response_sha256,
+            "response_path": str(
+                Path(artifact.response_path).resolve().relative_to(
+                    self._root.resolve()
+                )
+            ),
+            "raw_manifest_path": str(
+                Path(artifact.manifest_path).resolve().relative_to(
+                    self._root.resolve()
+                )
+            ),
+            "credential_values_persisted": False,
+        }
+        content = (json.dumps(record, indent=2, sort_keys=True) + "\n").encode(
+            "utf-8"
+        )
+        record_path = (
+            self._root
+            / "cache"
+            / request_cache_key
+            / f"{stamp}-{artifact.response_sha256}.json"
+        )
+        self._write_once(record_path, content)
+
+    def load_cached(
+        self,
+        *,
+        request_url: str,
+        timeframe: str,
+        now: datetime,
+        max_age: timedelta,
+    ) -> tuple[HttpResponse, RawArtifact] | None:
+        request_cache_key = self._request_cache_key(request_url, timeframe)
+        cache_dir = self._root / "cache" / request_cache_key
+        if not cache_dir.exists():
+            return None
+        candidates = sorted(cache_dir.glob("*.json"), reverse=True)
+        for record_path in candidates:
+            try:
+                record = json.loads(record_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise RuntimeError(
+                    f"invalid immutable cache record: {record_path}"
+                ) from exc
+            if not isinstance(record, dict):
+                raise RuntimeError(f"invalid immutable cache record: {record_path}")
+            if (
+                record.get("schema_version")
+                != "alpaca-immutable-request-cache-v1"
+                or record.get("adapter_version") != ADAPTER_VERSION
+                or record.get("license_class") != self._license_class
+                or record.get("provider") != ALPACA_PROVIDER_NAME
+                or record.get("request_cache_key") != request_cache_key
+                or record.get("request_url") != request_url
+                or record.get("timeframe") != timeframe
+                or record.get("status") != 200
+            ):
+                raise RuntimeError(
+                    f"immutable cache identity mismatch: {record_path}"
+                )
+            try:
+                retrieved_at = parse_timestamp(str(record["retrieved_at"]))
+            except (KeyError, TypeError, ValueError) as exc:
+                raise RuntimeError(
+                    f"invalid immutable cache timestamp: {record_path}"
+                ) from exc
+            age = now.astimezone(UTC) - retrieved_at
+            if age < timedelta(0):
+                raise RuntimeError(
+                    f"immutable cache record is future-dated: {record_path}"
+                )
+            if age > max_age:
+                continue
+            response_path = (
+                self._root / str(record.get("response_path", ""))
+            ).resolve()
+            manifest_path = (
+                self._root / str(record.get("raw_manifest_path", ""))
+            ).resolve()
+            try:
+                response_path.relative_to(self._root.resolve())
+                manifest_path.relative_to(self._root.resolve())
+            except ValueError as exc:
+                raise RuntimeError(
+                    f"immutable cache path escapes raw root: {record_path}"
+                ) from exc
+            if not response_path.is_file() or not manifest_path.is_file():
+                raise RuntimeError(
+                    f"immutable cache references a missing raw artifact: {record_path}"
+                )
+            response_body = response_path.read_bytes()
+            response_hash = hashlib.sha256(response_body).hexdigest()
+            if response_hash != record.get("response_sha256"):
+                raise RuntimeError(
+                    f"immutable cached response hash mismatch: {response_path}"
+                )
+            try:
+                raw_manifest = json.loads(
+                    manifest_path.read_text(encoding="utf-8")
+                )
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise RuntimeError(
+                    f"invalid immutable cached raw manifest: {manifest_path}"
+                ) from exc
+            manifest_identity = {
+                key: raw_manifest.get(key) if isinstance(raw_manifest, dict) else None
+                for key in (
+                    "adapter_version",
+                    "attempt",
+                    "license_class",
+                    "provider",
+                    "request_url",
+                    "response_sha256",
+                    "retrieved_at",
+                    "status",
+                    "timeframe",
+                )
+            }
+            manifest_hash = hashlib.sha256(
+                json.dumps(
+                    manifest_identity, sort_keys=True, separators=(",", ":")
+                ).encode("utf-8")
+            ).hexdigest()
+            if (
+                not isinstance(raw_manifest, dict)
+                or raw_manifest.get("adapter_version") != ADAPTER_VERSION
+                or raw_manifest.get("license_class") != self._license_class
+                or raw_manifest.get("provider") != ALPACA_PROVIDER_NAME
+                or raw_manifest.get("request_url") != request_url
+                or raw_manifest.get("response_sha256") != response_hash
+                or raw_manifest.get("retrieved_at") != record.get("retrieved_at")
+                or raw_manifest.get("status") != 200
+                or raw_manifest.get("timeframe") != timeframe
+                or raw_manifest.get("request_sha256") != manifest_hash
+                or manifest_path.stem != manifest_hash
+            ):
+                raise RuntimeError(
+                    f"immutable cached raw manifest mismatch: {manifest_path}"
+                )
+            artifact = RawArtifact(
+                response_sha256=response_hash,
+                request_sha256=str(raw_manifest.get("request_sha256", "")),
+                response_path=str(response_path),
+                manifest_path=str(manifest_path),
+                request_url=request_url,
+                retrieved_at=retrieved_at,
+                status=200,
+                cache_hit=True,
+            )
+            return HttpResponse(status=200, headers={}, body=response_body), artifact
+        return None
+
 
 @dataclass(frozen=True, slots=True)
 class AcceptedPage:
@@ -380,6 +581,8 @@ class AcceptedPage:
 class AlpacaIngestionAudit:
     adapter_version: str
     requests: int
+    network_requests: int
+    cache_hits: int
     accepted_pages: int
     minute_raw_bars: int
     minute_normalized_bars: int
@@ -401,6 +604,8 @@ class AlpacaIngestionAudit:
         return {
             "adapter_version": self.adapter_version,
             "requests": self.requests,
+            "network_requests": self.network_requests,
+            "cache_hits": self.cache_hits,
             "accepted_pages": self.accepted_pages,
             "minute_raw_bars": self.minute_raw_bars,
             "minute_normalized_bars": self.minute_normalized_bars,
@@ -417,7 +622,7 @@ class AlpacaIngestionAudit:
 class AlpacaHistoricalProvider:
     """Fetch a deliberately small historical bar sample; never touches trading APIs."""
 
-    name = "alpaca_market_data"
+    name = ALPACA_PROVIDER_NAME
 
     def __init__(
         self,
@@ -435,9 +640,13 @@ class AlpacaHistoricalProvider:
         self._clock = clock or (lambda: datetime.now(UTC))
         self._monotonic = monotonic or time.monotonic
         self._sleeper = sleeper or time.sleep
-        self._raw_store = ImmutableRawStore(config.raw_root)
+        self._raw_store = ImmutableRawStore(
+            config.raw_root, config.license_class
+        )
         self._last_request_at: float | None = None
         self._artifacts: list[RawArtifact] = []
+        self._network_requests = 0
+        self._cache_hits = 0
         self._audit: AlpacaIngestionAudit | None = None
 
     @property
@@ -483,13 +692,40 @@ class AlpacaHistoricalProvider:
         return min(delay, self._config.max_retry_delay_seconds)
 
     def _request_json(self, url: str, timeframe: str) -> AcceptedPage:
+        if self._config.cache_enabled:
+            cached = self._raw_store.load_cached(
+                request_url=url,
+                timeframe=timeframe,
+                now=self._clock().astimezone(UTC),
+                max_age=timedelta(hours=self._config.cache_max_age_hours),
+            )
+            if cached is not None:
+                response, artifact = cached
+                self._artifacts.append(artifact)
+                self._cache_hits += 1
+                return self._decode_accepted_page(response, artifact)
         for attempt in range(1, self._config.max_attempts + 1):
             self._pace()
-            response = self._transport.get(
-                url,
-                self._credentials.headers,
-                self._config.timeout_seconds,
-            )
+            self._network_requests += 1
+            try:
+                response = self._transport.get(
+                    url,
+                    self._credentials.headers,
+                    self._config.timeout_seconds,
+                )
+            except AlpacaRequestError as exc:
+                if attempt < self._config.max_attempts:
+                    self._sleeper(
+                        min(
+                            float(2 ** (attempt - 1)),
+                            self._config.max_retry_delay_seconds,
+                        )
+                    )
+                    continue
+                raise AlpacaRequestError(
+                    "Alpaca historical bars request failed after configured retries; "
+                    "no response body was available to preserve"
+                ) from exc
             retrieved_at = self._clock().astimezone(UTC)
             artifact = self._raw_store.preserve(
                 request_url=url,
@@ -500,15 +736,10 @@ class AlpacaHistoricalProvider:
             )
             self._artifacts.append(artifact)
             if response.status == 200:
-                try:
-                    payload = json.loads(response.body.decode("utf-8"))
-                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-                    raise AlpacaRequestError(
-                        "Alpaca historical bars returned invalid JSON; raw response preserved"
-                    ) from exc
-                if not isinstance(payload, dict):
-                    raise AlpacaRequestError("Alpaca response root must be an object")
-                return AcceptedPage(payload=payload, artifact=artifact)
+                page = self._decode_accepted_page(response, artifact)
+                if self._config.cache_enabled:
+                    self._raw_store.cache_success(artifact, timeframe)
+                return page
             if response.status in RETRYABLE_STATUSES and attempt < self._config.max_attempts:
                 self._sleeper(self._retry_delay(response, attempt))
                 continue
@@ -516,6 +747,20 @@ class AlpacaHistoricalProvider:
                 f"Alpaca historical bars returned HTTP {response.status}; raw response preserved"
             )
         raise AssertionError("unreachable request retry state")
+
+    @staticmethod
+    def _decode_accepted_page(
+        response: HttpResponse, artifact: RawArtifact
+    ) -> AcceptedPage:
+        try:
+            payload = json.loads(response.body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise AlpacaRequestError(
+                "Alpaca historical bars returned invalid JSON; raw response preserved"
+            ) from exc
+        if not isinstance(payload, dict):
+            raise AlpacaRequestError("Alpaca response root must be an object")
+        return AcceptedPage(payload=payload, artifact=artifact)
 
     @staticmethod
     def _timestamp(value: datetime) -> str:
@@ -664,6 +909,8 @@ class AlpacaHistoricalProvider:
         now = clock_value.astimezone(UTC)
         self._config.validate(now)
         self._artifacts = []
+        self._network_requests = 0
+        self._cache_hits = 0
         minute_pages = self._fetch_pages(
             "1Min", self._config.minute_start, self._config.minute_end
         )
@@ -720,6 +967,8 @@ class AlpacaHistoricalProvider:
         self._audit = AlpacaIngestionAudit(
             adapter_version=ADAPTER_VERSION,
             requests=len(self._artifacts),
+            network_requests=self._network_requests,
+            cache_hits=self._cache_hits,
             accepted_pages=len(minute_pages) + len(daily_pages),
             minute_raw_bars=minute_raw,
             minute_normalized_bars=len(minute_bars),

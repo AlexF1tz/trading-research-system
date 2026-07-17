@@ -1,6 +1,6 @@
 # Market-Data Pipeline
 
-Stage 2 now also provides a bounded read-only Alpaca historical-bars adapter and quality-only command. See [ALPACA_HISTORICAL.md](ALPACA_HISTORICAL.md). The original synthetic/CSV sample remains the deterministic feature-engineering path; the real-data command intentionally stops after normalization and quality reporting.
+Stage 2 uses a bounded read-only Alpaca historical-bars adapter and quality-only command as its primary market-data path. See [ALPACA_HISTORICAL.md](ALPACA_HISTORICAL.md). The synthetic/CSV sample remains only as a deterministic offline regression and feature-engineering path; the real-data command intentionally stops after normalization and quality reporting.
 
 Implemented 16 July 2026. This is an engineering vertical slice, not a profitable-strategy or market-coverage claim.
 
@@ -77,7 +77,7 @@ Coverage warnings include `FLOAT_UNAVAILABLE`, `STALE_FLOAT`, `HISTORICAL_UNIVER
 
 | Field | Free-source status |
 | --- | --- |
-| Minute/daily OHLCV | Available from some credentialed free tiers, often delayed or IEX-only. No real feed is bundled. |
+| Minute/daily OHLCV | A real Alpaca historical-bars adapter is bundled and requires a legitimate credential. The default IEX feed is single-venue and incomplete. |
 | Premarket/regular session | Supported when the provider supplies extended-hours bars and a coverage manifest. |
 | Bid/ask | Optional. Free live data may be single-venue rather than consolidated NBBO; feed status is mandatory. |
 | Ticker/exchange | Current Nasdaq Trader/SEC mappings are free but are not a complete effective-dated historical master. |
@@ -93,7 +93,7 @@ Coverage warnings include `FLOAT_UNAVAILABLE`, `STALE_FLOAT`, `HISTORICAL_UNIVER
 
 The zero-dependency calendar implements standard US Eastern DST rules in force since 2007 and standard 04:00–09:30 premarket / 09:30–16:00 regular boundaries. A real adapter must inject authoritative holiday and early-close dates. The defaults must not be interpreted as a complete Nasdaq/NYSE trading calendar.
 
-## Run the sample
+## Run the offline regression fixture
 
 ```powershell
 python -m pip install -e .
