@@ -71,7 +71,8 @@ class ShadowMonitor:
             self.store.write_raw(item.source_family.value, item.source_id, item.to_dict())
         for observation in batch.market_observations:
             self.policy.validate(SourceFamily.MARKET_DATA, observation.source_url, batch.mode)
-            self.store.write_normalized("market", observation.observation_id, observation.to_dict())
+            if not self.store.has_normalized("market", observation.observation_id):
+                self.store.write_normalized("market", observation.observation_id, observation.to_dict())
         result = CatalystPipeline(BatchCatalystProvider(batch.catalyst_batch)).run()
         for document in result.batch.documents:
             family = SourceFamily.SEC if document.source_kind.value == "sec_filing" else SourceFamily.APPROVED_NEWS
@@ -112,7 +113,8 @@ class ShadowMonitor:
                 float(obs.close) * int(obs.volume), (float(obs.ask) - float(obs.bid)) / float(obs.close) * 100,
                 int(obs.volume) / int(obs.free_float),
             )
-            self.store.write_normalized("features", feature.feature_id, feature.to_dict())
+            if not self.store.has_normalized("features", feature.feature_id):
+                self.store.write_normalized("features", feature.feature_id, feature.to_dict())
             output[obs.ticker] = (feature, ())
         return output
 
@@ -160,7 +162,7 @@ class ShadowMonitor:
 
     def _heartbeat(self, now, provider, mode, status, stale, raw, market, docs, alerts, outcomes):  # type: ignore[no-untyped-def]
         from .contracts import MonitorMode
-        heartbeat = Heartbeat(canonical_hash([now.isoformat(), self.cycle, status.value]), self.cycle, now, provider,
+        heartbeat = Heartbeat(canonical_hash([now.isoformat(), self.cycle, status.value, raw, market, docs, alerts, outcomes]), self.cycle, now, provider,
                               MonitorMode(mode), status, stale, self.reconnect_attempt, raw, market, docs, alerts, outcomes)
         self.store.write_heartbeat(heartbeat.heartbeat_id, heartbeat.to_dict())
         return heartbeat

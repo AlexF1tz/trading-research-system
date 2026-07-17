@@ -49,6 +49,13 @@ def test_shadow_records_are_deduplicated_and_features_are_gated(tmp_path):
     assert len(list((tmp_path / "data/raw/sec").glob("*.json"))) == 1
 
 
+def test_restarting_same_second_does_not_collide_on_duplicate_market_observation(tmp_path):
+    first, _ = monitor(tmp_path)
+    first.run_cycle()
+    second, _ = monitor(tmp_path)
+    second.run_cycle()
+
+
 def test_outcome_is_append_only_and_never_training_data(tmp_path):
     subject, _ = monitor(tmp_path, outcome_horizon_minutes=1)
     subject.run_cycle()
