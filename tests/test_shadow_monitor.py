@@ -7,7 +7,10 @@ import pytest
 
 from equity_research.shadow.contracts import MonitorMode, SourceFamily
 from equity_research.shadow.monitor import MODELLING_BLOCK, MonitorConfig, ShadowMonitor
-from equity_research.shadow.provider import EndpointPolicy, ReplayShadowProvider, SecEdgarProvider, TransientSourceError
+from equity_research.shadow.provider import (
+    AlpacaLiveMarketProvider, CompositeShadowProvider, EndpointPolicy,
+    ReplayShadowProvider, SecEdgarProvider, TransientSourceError,
+)
 from equity_research.shadow.storage import ImmutableStore
 from equity_research.shadow.synthetic import SyntheticShadowProvider
 
@@ -57,12 +60,13 @@ def test_restarting_same_second_does_not_collide_on_duplicate_market_observation
 
 
 def test_outcome_is_append_only_and_never_training_data(tmp_path):
-    subject, _ = monitor(tmp_path, outcome_horizon_minutes=1)
+    subject, _ = monitor(tmp_path, outcome_intervals_minutes=(1,))
     subject.run_cycle()
     heartbeat = subject.run_cycle()
     assert heartbeat.outcomes_written == 1
     outcome = json.loads(next((tmp_path / "predictions/outcomes").glob("*.json")).read_text())
     assert outcome["used_for_training"] is False
+    assert outcome["horizon_minutes"] == 1
 
 
 def test_endpoint_policy_rejects_trading_and_unapproved_news():
@@ -170,3 +174,44 @@ def test_sec_provider_enforces_request_pacing():
     )
     provider.poll(datetime(2026, 7, 17, 13, 40, tzinfo=UTC))
     assert delays and delays[0] >= 0
+
+
+def test_alpaca_live_provider_labels_iex_and_missing_fields():
+    payload = {"AAPL": {
+        "minuteBar": {"t": "2026-07-17T13:30:00Z", "c": 210.5, "v": 12345},
+        "latestQuote": {"t": "2026-07-17T13:30:01Z", "bp": 210.49, "ap": 210.51},
+    }}
+    captured = []
+    def opener(request, timeout):
+        captured.append(request.full_url)
+        return FakeResponse(payload)
+    provider = AlpacaLiveMarketProvider({"AAPL": "SEC-CIK-0000320193"}, "key", "secret", feed="iex", opener=opener)
+    batch = provider.poll(datetime(2026, 7, 17, 13, 30, 2, tzinfo=UTC))
+    observation = batch.market_observations[0]
+    assert captured[0].startswith("https://data.alpaca.markets/v2/stocks/snapshots?")
+    assert observation.close == 210.5 and observation.volume == 12345
+    assert observation.bid == 210.49 and observation.ask == 210.51
+    assert observation.consolidated_coverage is False
+    assert "NON_CONSOLIDATED_COVERAGE" in observation.missing_flags
+    assert "INCOMPLETE_BAR" in observation.missing_flags
+    assert "MISSING_HALT_STATUS" in observation.missing_flags
+    assert batch.raw_items[0].payload == payload
+
+
+def test_composite_provider_associates_sec_and_market_by_ticker(tmp_path):
+    sec_payload = {"filings": {"recent": {
+        "accessionNumber": ["0000320193-26-000004"], "filingDate": ["2026-07-17"],
+        "acceptanceDateTime": ["20260717133000"], "form": ["8-K"]
+    }}}
+    market_payload = {"AAPL": {
+        "minuteBar": {"t": "2026-07-17T13:30:00Z", "c": 210.5, "v": 12345},
+        "latestQuote": {"t": "2026-07-17T13:30:01Z", "bp": 210.49, "ap": 210.51},
+    }}
+    sec = SecEdgarProvider({"320193": "AAPL"}, "Research contact@example.edu", lambda *a, **k: FakeResponse(sec_payload))
+    market = AlpacaLiveMarketProvider({"AAPL": "SEC-CIK-0000320193"}, "key", "secret", opener=lambda *a, **k: FakeResponse(market_payload))
+    subject, store = monitor(tmp_path, CompositeShadowProvider((sec, market)))
+    subject.run_cycle()
+    alert = store.alert_records()[0]
+    assert alert["ticker"] == "AAPL"
+    assert alert["reference_price"] == 210.5
+    assert "NON_CONSOLIDATED_COVERAGE" in alert["data_quality_flags"]

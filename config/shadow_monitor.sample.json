@@ -8,6 +8,6 @@
     "stale_after_seconds": 120.0,
     "reconnect_initial_seconds": 1.0,
     "reconnect_max_seconds": 30.0,
-    "outcome_horizon_minutes": 120
+    "outcome_intervals_minutes": [5, 15, 30, 60]
   }
 }

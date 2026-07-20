@@ -29,6 +29,25 @@ SEC accession state is persisted at `data/shadow/sec_seen.json` so restarts do n
 .\.venv\Scripts\python.exe -m equity_research.shadow.cli --config config\shadow_sec_replay.sample.json --max-cycles 1
 ```
 
+### SEC plus Alpaca market-data shadow monitor
+
+This mode calls only Alpaca's `data.alpaca.markets/v2/stocks/snapshots` endpoint. It does not use account, position, order, paper-trading, or brokerage endpoints. Set credentials in the current PowerShell process without printing them, update the placeholder SEC contact in a private config copy, and run:
+
+```powershell
+$env:ALPACA_API_KEY_ID = Read-Host "Alpaca market-data key ID"
+$alpacaSecret = Read-Host "Alpaca market-data secret" -AsSecureString
+$env:ALPACA_API_SECRET_KEY = [System.Net.NetworkCredential]::new("", $alpacaSecret).Password
+.\.venv\Scripts\python.exe -m equity_research.shadow.cli --config config\shadow_sec_alpaca.sample.json
+```
+
+The sample selects `iex`; every observation is therefore labelled non-consolidated. Change to `sip` only when the current entitlement permits it. Offline combined replay requires no credentials or network access:
+
+```powershell
+.\.venv\Scripts\python.exe -m equity_research.shadow.cli --config config\shadow_sec_alpaca_replay.sample.json --max-cycles 1
+```
+
+Shadow outcomes are appended after 5, 15, 30, and 60 minutes. They are evaluation records with `used_for_training=false`, not model predictions or trading recommendations.
+
 The initial deliverables are:
 
 - [Architecture](docs/ARCHITECTURE.md)

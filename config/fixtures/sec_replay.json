@@ -1,0 +1,30 @@
+{
+  "cycles": [
+    {
+      "provider": "sec-replay-fixture",
+      "raw_items": [{
+        "source_id": "sec-replay-1", "source_family": "sec",
+        "source_url": "https://data.sec.gov/submissions/CIK0000320193.json",
+        "source_timestamp": "2026-07-17T13:30:00Z", "first_seen_at": "2026-07-17T13:30:05Z",
+        "payload": {"accession": "0000320193-26-000001", "form": "8-K"}, "license_class": "sec_public_edgar"
+      }],
+      "market_observations": [],
+      "catalyst_documents": [{
+        "document_id": "sec-replay-document-1", "ticker": "AAPL", "issuer_id": "0000320193",
+        "title": "SEC 8-K replay fixture", "text": "SEC filing form 8-K.",
+        "source_url": "https://www.sec.gov/Archives/edgar/data/320193/000032019326000001/0000320193-26-000001-index.html",
+        "source_kind": "sec_filing", "published_at": "2026-07-17T13:30:00Z",
+        "first_public_at": "2026-07-17T13:30:00Z", "first_seen_at": "2026-07-17T13:30:05Z",
+        "accepted_at": "2026-07-17T13:29:59Z", "source_timestamp_verified": true,
+        "source_record_id": "0000320193-26-000001", "form_type": "8-K",
+        "accession_number": "0000320193-26-000001"
+      }],
+      "source_watermarks": [{"source_family": "sec", "timestamp": "2026-07-17T13:30:00Z"}]
+    },
+    {
+      "provider": "sec-replay-fixture", "raw_items": [], "market_observations": [],
+      "catalyst_documents": [],
+      "source_watermarks": [{"source_family": "sec", "timestamp": "2026-07-17T13:31:00Z"}]
+    }
+  ]
+}

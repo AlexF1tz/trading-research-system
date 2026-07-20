@@ -37,6 +37,9 @@ class ImmutableStore:
     def write_outcome(self, outcome_id: str, value: object) -> bool:
         return self._write(self.prediction_root / "outcomes" / f"{outcome_id}.json", value)
 
+    def has_outcome(self, outcome_id: str) -> bool:
+        return (self.prediction_root / "outcomes" / f"{outcome_id}.json").exists()
+
     def write_heartbeat(self, heartbeat_id: str, value: object) -> bool:
         return self._write(self.prediction_root / "heartbeats" / f"{heartbeat_id}.json", value)
 

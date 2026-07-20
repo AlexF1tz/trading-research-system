@@ -28,7 +28,7 @@ class MonitorConfig:
     stale_after_seconds: float = 120.0
     reconnect_initial_seconds: float = 1.0
     reconnect_max_seconds: float = 30.0
-    outcome_horizon_minutes: int = 120
+    outcome_intervals_minutes: tuple[int, ...] = (5, 15, 30, 60)
 
 
 class ShadowMonitor:
@@ -37,6 +37,8 @@ class ShadowMonitor:
                  sleeper: Callable[[float], None] = time.sleep) -> None:
         self.provider, self.store = provider, store
         self.config = config or MonitorConfig()
+        if not self.config.outcome_intervals_minutes or any(value <= 0 for value in self.config.outcome_intervals_minutes):
+            raise ValueError("outcome intervals must contain positive minutes")
         self.policy = endpoint_policy or EndpointPolicy()
         self.clock = clock or (lambda: datetime.now(UTC))
         self.sleeper = sleeper
@@ -128,7 +130,7 @@ class ShadowMonitor:
             if self.store.has_alert(alert_id):
                 continue
             alert = ResearchAlert(
-                alert_id, now, now, now + timedelta(minutes=self.config.outcome_horizon_minutes),
+                alert_id, now, now, now + timedelta(minutes=max(self.config.outcome_intervals_minutes)),
                 observation.security_id if observation else f"unresolved:{event.ticker}", event.ticker,
                 event.event_id, event.catalyst_category.value, event.source_url,
                 AlertStatus.RESEARCH_ONLY if feature is not None and not stale else AlertStatus.BLOCKED_DATA,
@@ -143,21 +145,24 @@ class ShadowMonitor:
     def _outcomes(self, now: datetime) -> int:
         written = 0
         for alert in self.store.alert_records():
-            horizon = datetime.fromisoformat(str(alert["horizon_end"]).replace("Z", "+00:00"))
-            if horizon > now: continue
-            records = self.store.market_records(str(alert["security_id"]))
             start = datetime.fromisoformat(str(alert["alert_as_of"]).replace("Z", "+00:00"))
-            prices = [float(r["close"]) for r in records if r.get("close") is not None and start < datetime.fromisoformat(str(r["source_timestamp"]).replace("Z", "+00:00")) <= horizon]
-            reference = alert.get("reference_price")
-            complete = bool(prices and reference)
-            outcome = ShadowOutcome(
-                canonical_hash([alert["alert_id"], "shadow-outcome-v1"]), str(alert["alert_id"]), now, horizon,
-                "complete" if complete else "insufficient_observations",
-                (prices[-1] / float(reference) - 1) * 100 if complete else None,
-                (max(prices) / float(reference) - 1) * 100 if complete else None,
-                (min(prices) / float(reference) - 1) * 100 if complete else None, len(prices), False,
-            )
-            written += int(self.store.write_outcome(outcome.outcome_id, outcome.to_dict()))
+            records = self.store.market_records(str(alert["security_id"]))
+            for minutes in self.config.outcome_intervals_minutes:
+                horizon = start + timedelta(minutes=minutes)
+                if horizon > now:
+                    continue
+                prices = [float(r["close"]) for r in records if r.get("close") is not None and start < datetime.fromisoformat(str(r["source_timestamp"]).replace("Z", "+00:00")) <= horizon]
+                reference = alert.get("reference_price")
+                complete = bool(prices and reference)
+                outcome = ShadowOutcome(
+                    canonical_hash([alert["alert_id"], minutes, "shadow-outcome-v1"]), str(alert["alert_id"]), now,
+                    horizon, minutes, "complete" if complete else "insufficient_observations",
+                    (prices[-1] / float(reference) - 1) * 100 if complete else None,
+                    (max(prices) / float(reference) - 1) * 100 if complete else None,
+                    (min(prices) / float(reference) - 1) * 100 if complete else None, len(prices), False,
+                )
+                if not self.store.has_outcome(outcome.outcome_id):
+                    written += int(self.store.write_outcome(outcome.outcome_id, outcome.to_dict()))
         return written
 
     def _heartbeat(self, now, provider, mode, status, stale, raw, market, docs, alerts, outcomes):  # type: ignore[no-untyped-def]

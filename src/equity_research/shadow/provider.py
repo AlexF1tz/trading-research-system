@@ -7,10 +7,10 @@ import os
 import time
 from urllib.request import Request, urlopen
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 from equity_research.catalyst_intelligence.contracts import (
     NumericalDetail,
@@ -25,6 +25,7 @@ from .contracts import (
     RawSourceItem,
     ShadowInputBatch,
     SourceFamily,
+    canonical_hash,
 )
 
 
@@ -185,6 +186,99 @@ class SecEdgarProvider:
         batch = SourceBatch("sec_edgar", "sec_submissions_recent", processing_time, tuple(documents))
         return ShadowInputBatch("sec_edgar", MonitorMode.LIVE, processing_time, tuple(raw_items), (), batch,
                                 ((SourceFamily.SEC, processing_time),))
+
+
+class AlpacaLiveMarketProvider:
+    """GET-only Alpaca stock snapshots adapter; never touches brokerage APIs."""
+
+    def __init__(self, symbols: dict[str, str], key_id: str, secret_key: str, *,
+                 feed: str = "iex", delayed_seconds: int = 0, opener=urlopen) -> None:  # type: ignore[no-untyped-def]
+        if not symbols:
+            raise ValueError("at least one Alpaca symbol is required")
+        if feed not in {"iex", "sip"}:
+            raise ValueError("Alpaca feed must be iex or sip")
+        if not key_id or not secret_key:
+            raise ValueError("ALPACA_API_KEY_ID and ALPACA_API_SECRET_KEY are required")
+        if delayed_seconds < 0:
+            raise ValueError("delayed_seconds cannot be negative")
+        self._symbols = {ticker.upper(): security_id for ticker, security_id in symbols.items()}
+        self._headers = {
+            "APCA-API-KEY-ID": key_id, "APCA-API-SECRET-KEY": secret_key,
+            "Accept": "application/json", "User-Agent": "equity-research-system/read-only-shadow",
+        }
+        self._feed = feed
+        self._delayed_seconds = delayed_seconds
+        self._opener = opener
+
+    def poll(self, processing_time: datetime) -> ShadowInputBatch:
+        query = urlencode({"symbols": ",".join(sorted(self._symbols)), "feed": self._feed})
+        url = f"https://data.alpaca.markets/v2/stocks/snapshots?{query}"
+        try:
+            with self._opener(Request(url, headers=self._headers), timeout=30) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (OSError, ValueError) as exc:
+            raise TransientSourceError("Alpaca market-data snapshot request failed") from exc
+        observations: list[MarketObservation] = []
+        source_times: list[datetime] = []
+        for ticker, security_id in self._symbols.items():
+            snapshot = payload.get(ticker, {})
+            bar = snapshot.get("minuteBar") or {}
+            quote = snapshot.get("latestQuote") or {}
+            bar_time = _dt(str(bar["t"])) if bar.get("t") else processing_time
+            quote_time = _dt(str(quote["t"])) if quote.get("t") else None
+            source_times.extend(value for value in (bar_time, quote_time) if value is not None)
+            flags: list[str] = []
+            if not bar: flags.append("MISSING_BAR")
+            bar_complete = bool(bar) and processing_time >= bar_time + timedelta(minutes=1)
+            if bar and not bar_complete: flags.append("INCOMPLETE_BAR")
+            if not quote: flags.append("MISSING_QUOTES")
+            if self._feed == "iex": flags.append("NON_CONSOLIDATED_COVERAGE")
+            if self._delayed_seconds: flags.append("DELAYED_COVERAGE")
+            flags.extend(("MISSING_HALT_STATUS", "MISSING_FLOAT", "MISSING_RELATIVE_VOLUME_HISTORY"))
+            observations.append(MarketObservation(
+                observation_id=canonical_hash(["alpaca", self._feed, ticker, bar_time.isoformat()]),
+                security_id=security_id, ticker=ticker, source_url=url,
+                source_timestamp=bar_time, first_seen_at=processing_time,
+                processing_timestamp=processing_time, feed=f"alpaca_{self._feed}",
+                bar_complete=bar_complete, close=float(bar["c"]) if bar.get("c") is not None else None,
+                volume=int(bar["v"]) if bar.get("v") is not None else None,
+                bid=float(quote["bp"]) if quote.get("bp") is not None else None,
+                ask=float(quote["ap"]) if quote.get("ap") is not None else None,
+                consolidated_coverage=self._feed == "sip", halt_status=None, free_float=None,
+                missing_flags=tuple(sorted(set(flags))), provider_received_at=processing_time,
+            ))
+        source_timestamp = max(source_times, default=processing_time)
+        raw = RawSourceItem(
+            source_id=f"alpaca-snapshots-{self._feed}-{'-'.join(sorted(self._symbols))}",
+            source_family=SourceFamily.MARKET_DATA, source_url=url,
+            source_timestamp=source_timestamp, first_seen_at=processing_time,
+            processing_timestamp=processing_time, payload=payload,
+            license_class="alpaca_market_data_entitlement_required",
+            provider_received_at=processing_time,
+        )
+        empty = SourceBatch("alpaca_market_data", "live_snapshots", processing_time, ())
+        return ShadowInputBatch("alpaca_market_data", MonitorMode.LIVE, processing_time, (raw,),
+                                tuple(observations), empty, ((SourceFamily.MARKET_DATA, source_timestamp),))
+
+
+class CompositeShadowProvider:
+    """Combine independently read-only providers into one timestamped cycle."""
+
+    def __init__(self, providers: tuple[ShadowSourceProvider, ...]) -> None:
+        if not providers:
+            raise ValueError("composite provider requires at least one provider")
+        self._providers = providers
+
+    def poll(self, processing_time: datetime) -> ShadowInputBatch:
+        batches = tuple(provider.poll(processing_time) for provider in self._providers)
+        documents = tuple(document for batch in batches for document in batch.catalyst_batch.documents)
+        catalysts = SourceBatch("composite_shadow", "live_sources", processing_time, documents)
+        return ShadowInputBatch(
+            "composite_shadow", MonitorMode.LIVE, processing_time,
+            tuple(item for batch in batches for item in batch.raw_items),
+            tuple(item for batch in batches for item in batch.market_observations), catalysts,
+            tuple(item for batch in batches for item in batch.source_watermarks),
+        )
 
 
 def _dt(value: str) -> datetime:

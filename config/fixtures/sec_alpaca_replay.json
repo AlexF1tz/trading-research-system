@@ -1,0 +1,27 @@
+{
+  "cycles": [{
+    "provider": "sec-alpaca-replay-fixture",
+    "raw_items": [
+      {"source_id": "sec-combined-1", "source_family": "sec", "source_url": "https://data.sec.gov/submissions/CIK0000320193.json", "source_timestamp": "2026-07-17T13:30:00Z", "first_seen_at": "2026-07-17T13:30:02Z", "payload": {"accession": "0000320193-26-000005"}},
+      {"source_id": "alpaca-combined-1", "source_family": "market_data", "source_url": "https://data.alpaca.markets/v2/stocks/snapshots?symbols=AAPL&feed=iex", "source_timestamp": "2026-07-17T13:30:00Z", "first_seen_at": "2026-07-17T13:30:02Z", "payload": {"feed": "iex"}}
+    ],
+    "market_observations": [{
+      "observation_id": "alpaca-iex-AAPL-20260717T133000Z", "security_id": "SEC-CIK-0000320193", "ticker": "AAPL",
+      "source_url": "https://data.alpaca.markets/v2/stocks/snapshots?symbols=AAPL&feed=iex", "source_timestamp": "2026-07-17T13:30:00Z",
+      "first_seen_at": "2026-07-17T13:30:02Z", "feed": "alpaca_iex", "bar_complete": true, "close": 210.5,
+      "volume": 12345, "bid": 210.49, "ask": 210.51, "consolidated_coverage": false, "halt_status": null,
+      "free_float": null, "missing_flags": ["NON_CONSOLIDATED_COVERAGE", "MISSING_HALT_STATUS", "MISSING_FLOAT", "MISSING_RELATIVE_VOLUME_HISTORY"]
+    }],
+    "catalyst_documents": [{
+      "document_id": "sec-combined-document-1", "ticker": "AAPL", "issuer_id": "0000320193", "title": "SEC 8-K replay fixture",
+      "text": "SEC filing form 8-K.", "source_url": "https://www.sec.gov/Archives/edgar/data/320193/000032019326000005/0000320193-26-000005-index.html",
+      "source_kind": "sec_filing", "published_at": "2026-07-17T13:30:00Z", "first_public_at": "2026-07-17T13:30:00Z",
+      "first_seen_at": "2026-07-17T13:30:02Z", "accepted_at": "2026-07-17T13:29:59Z", "source_timestamp_verified": true,
+      "source_record_id": "0000320193-26-000005", "form_type": "8-K", "accession_number": "0000320193-26-000005"
+    }],
+    "source_watermarks": [
+      {"source_family": "sec", "timestamp": "2026-07-17T13:30:00Z"},
+      {"source_family": "market_data", "timestamp": "2026-07-17T13:30:00Z"}
+    ]
+  }]
+}

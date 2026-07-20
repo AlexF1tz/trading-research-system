@@ -89,6 +89,8 @@ Storage and compute can remain local at $0 incremental service cost for the init
 
 The Stage 3 endpoint policy accepts fixture URLs only in synthetic/replay mode. Network market data is restricted to `data.alpaca.markets`, SEC inputs to `sec.gov` subdomains, and news to an explicit configured domain allowlist. Trading, paper-trading, brokerage, account, and order hosts are prohibited. No live network source is enabled by the sample configuration; activating one requires a separately reviewed read-only adapter and applicable credentials/user-agent identification.
 
+The combined SEC/Alpaca shadow configuration uses only `/v2/stocks/snapshots`. Its `iex` setting is single-venue and receives `NON_CONSOLIDATED_COVERAGE`; `sip` must not be selected without entitlement. Raw snapshot responses are retained locally under the configured licensing class and are excluded from Git.
+
 ## Licensing controls to implement
 
 - Tag every raw object and normalized dataset with provider and licensing class.

@@ -16,6 +16,8 @@ To run the SEC-first monitor, copy `config/shadow_sec.sample.json`, replace the 
 
 SEC submissions responses are retained as immutable raw records. Relevant accession numbers are stored in a local append-only state checkpoint for restart-safe deduplication. Requests are paced at no more than ten per second by default. The submissions endpoint exposes filing/acceptance metadata; the provider does not scrape filing text.
 
+The optional `sec_alpaca` mode composes SEC with a GET-only Alpaca snapshots provider. IEX is explicitly non-consolidated; SIP is marked consolidated only when configured and entitled. Quotes, halt status, float, and relative-volume history remain explicit missing flags when unavailable. Market observations are joined to same-cycle SEC events by normalized ticker, and the alert preserves the first observed price while later 5/15/30/60-minute outcomes remain append-only and excluded from training.
+
 ## Git Bash
 
 ```bash

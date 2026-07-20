@@ -1,0 +1,8 @@
+{
+  "mode": "replay",
+  "data_root": "data/shadow-market-replay",
+  "prediction_root": "predictions/shadow-market-replay",
+  "replay_path": "config/fixtures/sec_alpaca_replay.json",
+  "replay_loop": false,
+  "monitor": {"poll_interval_seconds": 60.0, "stale_after_seconds": 180.0, "outcome_intervals_minutes": [5, 15, 30, 60]}
+}

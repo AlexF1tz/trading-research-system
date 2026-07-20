@@ -203,6 +203,7 @@ class ShadowOutcome:
     alert_id: str
     evaluated_at: datetime
     horizon_end: datetime
+    horizon_minutes: int
     status: str
     return_pct: float | None
     maximum_favourable_excursion_pct: float | None

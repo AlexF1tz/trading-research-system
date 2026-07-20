@@ -137,7 +137,7 @@ The full contract is in [PREDICTION_SCHEMA.md](PREDICTION_SCHEMA.md). It is appe
 - `shadow_feature_record`: generated only from complete current and prior observations; records one-minute return, dollar volume, spread, bar float rotation, `as_of`, and `available_at`.
 - `research_alert`: research-only catalyst observation with data-quality flags, stale sources, the mandatory Alpaca/IEX empirical-modelling block, null execution recommendation, and false profitability/execution fields.
 - `heartbeat`: append-only source-health record with cycle, reconnect attempt, stale sources, counts, mandatory modelling block, and execution disabled.
-- `shadow_outcome`: append-only horizon evaluation referencing the alert ID; records return/MFE/MAE or insufficient coverage and always has `used_for_training=false`.
+- `shadow_outcome`: append-only 5/15/30/60-minute horizon evaluation referencing the alert ID; records horizon minutes, return/MFE/MAE or insufficient coverage and always has `used_for_training=false`.
 
 ## `prediction_outcome`
 
