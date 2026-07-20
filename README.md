@@ -48,6 +48,22 @@ The sample selects `iex`; every observation is therefore labelled non-consolidat
 
 Shadow outcomes are appended after 5, 15, 30, and 60 minutes. They are evaluation records with `used_for_training=false`, not model predictions or trading recommendations.
 
+### SEC, Alpaca, and Nasdaq halt monitor
+
+The halt provider polls the official Nasdaq Trader RSS feed no more than once per minute, preserves the raw XML, and converts Eastern halt/resumption times to UTC. With the same Alpaca environment variables shown above:
+
+```powershell
+.\.venv\Scripts\python.exe -m equity_research.shadow.cli --config config\shadow_sec_alpaca_halts.sample.json
+```
+
+Credential-free combined replay:
+
+```powershell
+.\.venv\Scripts\python.exe -m equity_research.shadow.cli --config config\shadow_sec_alpaca_halts_replay.sample.json --max-cycles 1
+```
+
+Halt status is considered known only while the halt-feed watermark is current. If the feed is stale, market records retain `halt_status=null` and `MISSING_HALT_STATUS`.
+
 The initial deliverables are:
 
 - [Architecture](docs/ARCHITECTURE.md)

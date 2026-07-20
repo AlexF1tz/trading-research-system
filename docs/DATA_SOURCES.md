@@ -91,6 +91,8 @@ The Stage 3 endpoint policy accepts fixture URLs only in synthetic/replay mode. 
 
 The combined SEC/Alpaca shadow configuration uses only `/v2/stocks/snapshots`. Its `iex` setting is single-venue and receives `NON_CONSOLIDATED_COVERAGE`; `sip` must not be selected without entitlement. Raw snapshot responses are retained locally under the configured licensing class and are excluded from Git.
 
+The Nasdaq Trader halt adapter uses only `https://www.nasdaqtrader.com/rss.aspx?feed=tradehalts`, follows the published once-per-minute refresh guideline, tags stored raw XML with the Nasdaq halt-RSS terms class, and performs no page scraping. Halt coverage becomes unknown when its feed watermark is stale.
+
 ## Licensing controls to implement
 
 - Tag every raw object and normalized dataset with provider and licensing class.

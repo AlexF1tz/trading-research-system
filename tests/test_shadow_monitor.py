@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -9,7 +10,7 @@ from equity_research.shadow.contracts import MonitorMode, SourceFamily
 from equity_research.shadow.monitor import MODELLING_BLOCK, MonitorConfig, ShadowMonitor
 from equity_research.shadow.provider import (
     AlpacaLiveMarketProvider, CompositeShadowProvider, EndpointPolicy,
-    ReplayShadowProvider, SecEdgarProvider, TransientSourceError,
+    NasdaqHaltProvider, ReplayShadowProvider, SecEdgarProvider, TransientSourceError,
 )
 from equity_research.shadow.storage import ImmutableStore
 from equity_research.shadow.synthetic import SyntheticShadowProvider
@@ -131,6 +132,10 @@ class FakeResponse:
     def read(self): return json.dumps(self.payload).encode()
 
 
+class FakeBytesResponse(FakeResponse):
+    def read(self): return self.payload
+
+
 def test_sec_provider_normalizes_and_deduplicates_filings():
     payload = {"filings": {"recent": {
         "accessionNumber": ["0000320193-26-000001", "0000320193-26-000002"],
@@ -215,3 +220,57 @@ def test_composite_provider_associates_sec_and_market_by_ticker(tmp_path):
     assert alert["ticker"] == "AAPL"
     assert alert["reference_price"] == 210.5
     assert "NON_CONSOLIDATED_COVERAGE" in alert["data_quality_flags"]
+
+
+def test_nasdaq_halt_provider_normalizes_and_restart_deduplicates(tmp_path):
+    xml = b'''<?xml version="1.0"?><rss xmlns:ndaq="urn:nasdaq"><channel><item>
+      <ndaq:IssueSymbol>AAPL</ndaq:IssueSymbol><ndaq:HaltDate>07/17/2026</ndaq:HaltDate>
+      <ndaq:HaltTime>09:35:00</ndaq:HaltTime><ndaq:ReasonCode>T1</ndaq:ReasonCode>
+      <ndaq:ResumptionDate>07/17/2026</ndaq:ResumptionDate>
+      <ndaq:ResumptionQuoteTime>09:45:00</ndaq:ResumptionQuoteTime>
+      <ndaq:ResumptionTradeTime>09:50:00</ndaq:ResumptionTradeTime>
+    </item></channel></rss>'''
+    state = tmp_path / "halts_seen.json"
+    provider = NasdaqHaltProvider(opener=lambda *a, **k: FakeBytesResponse(xml), state_path=state, sleeper=lambda _: None)
+    now = datetime(2026, 7, 17, 13, 40, tzinfo=UTC)
+    first = provider.poll(now)
+    halt = first.halt_observations[0]
+    assert halt.ticker == "AAPL" and halt.reason_code == "T1"
+    assert halt.halt_at == datetime(2026, 7, 17, 13, 35, tzinfo=UTC)
+    assert halt.resumption_trade_at == datetime(2026, 7, 17, 13, 50, tzinfo=UTC)
+    assert first.raw_items[0].payload["rss_xml"].startswith("<?xml")
+    restarted = NasdaqHaltProvider(opener=lambda *a, **k: FakeBytesResponse(xml), state_path=state, sleeper=lambda _: None)
+    assert restarted.poll(now).halt_observations[0].halt_id == halt.halt_id
+
+
+def test_current_halt_feed_sets_known_status(tmp_path):
+    xml = b'''<rss xmlns:ndaq="urn:nasdaq"><channel><item>
+      <ndaq:IssueSymbol>AAPL</ndaq:IssueSymbol><ndaq:HaltDate>07/17/2026</ndaq:HaltDate>
+      <ndaq:HaltTime>09:30:00</ndaq:HaltTime><ndaq:ReasonCode>T1</ndaq:ReasonCode>
+    </item></channel></rss>'''
+    market_payload = {"AAPL": {"minuteBar": {"t": "2026-07-17T13:30:00Z", "c": 210.5, "v": 10},
+                               "latestQuote": {"t": "2026-07-17T13:30:01Z", "bp": 210.4, "ap": 210.6}}}
+    market = AlpacaLiveMarketProvider({"AAPL": "SEC-CIK-0000320193"}, "key", "secret", opener=lambda *a, **k: FakeResponse(market_payload))
+    halts = NasdaqHaltProvider(opener=lambda *a, **k: FakeBytesResponse(xml), sleeper=lambda _: None)
+    subject, store = monitor(tmp_path, CompositeShadowProvider((market, halts)))
+    subject.run_cycle()
+    record = store.market_records("SEC-CIK-0000320193")[0]
+    assert record["halt_status"] == "halted"
+    assert "MISSING_HALT_STATUS" not in record["missing_flags"]
+
+
+def test_stale_halt_feed_keeps_status_unknown(tmp_path):
+    replay = ReplayShadowProvider(Path("config/fixtures/sec_alpaca_halts_replay.json"))
+    class StaleHalts:
+        def poll(self, processing_time):
+            batch = replay.poll(processing_time)
+            watermarks = tuple((family, processing_time - timedelta(hours=1) if family is SourceFamily.TRADING_HALTS else processing_time)
+                               for family, _ in batch.source_watermarks)
+            return type(batch)(batch.provider, batch.mode, batch.fetched_at, batch.raw_items,
+                               batch.market_observations, batch.catalyst_batch, watermarks, batch.halt_observations)
+    subject, store = monitor(tmp_path, StaleHalts(), stale_after_seconds=30)
+    heartbeat = subject.run_cycle()
+    record = store.market_records("SEC-CIK-0000320193")[0]
+    assert record["halt_status"] is None
+    assert "MISSING_HALT_STATUS" in record["missing_flags"]
+    assert "trading_halts" in heartbeat.stale_sources

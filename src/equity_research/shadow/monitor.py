@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Callable
 
@@ -71,7 +71,13 @@ class ShadowMonitor:
         for item in batch.raw_items:
             self.policy.validate(item.source_family, item.source_url, batch.mode)
             self.store.write_raw(item.source_family.value, item.source_id, item.to_dict())
-        for observation in batch.market_observations:
+        stale = tuple(sorted(family.value for family, watermark in batch.source_watermarks if (now - watermark).total_seconds() > self.config.stale_after_seconds))
+        for halt in batch.halt_observations:
+            self.policy.validate(SourceFamily.TRADING_HALTS, halt.source_url, batch.mode)
+            if not self.store.has_normalized("trading_halts", halt.halt_id):
+                self.store.write_normalized("trading_halts", halt.halt_id, halt.to_dict())
+        market_observations = self._apply_halt_status(batch.market_observations, batch.halt_observations, batch.source_watermarks, stale, now)
+        for observation in market_observations:
             self.policy.validate(SourceFamily.MARKET_DATA, observation.source_url, batch.mode)
             if not self.store.has_normalized("market", observation.observation_id):
                 self.store.write_normalized("market", observation.observation_id, observation.to_dict())
@@ -84,12 +90,35 @@ class ShadowMonitor:
         for event in result.events:
             if not self.store.has_normalized("catalyst_events", event.event_id):
                 self.store.write_normalized("catalyst_events", event.event_id, event.to_dict())
-        stale = tuple(sorted(family.value for family, watermark in batch.source_watermarks if (now - watermark).total_seconds() > self.config.stale_after_seconds))
-        features = self._features(batch.market_observations, now, stale)
-        alerts_written = self._alerts(result.events, batch.market_observations, features, stale, now)
+        features = self._features(market_observations, now, stale)
+        alerts_written = self._alerts(result.events, market_observations, features, stale, now)
         outcomes_written = self._outcomes(now)
         status = HeartbeatStatus.DEGRADED if stale else HeartbeatStatus.HEALTHY
         return self._heartbeat(now, batch.provider, batch.mode.value, status, stale, len(batch.raw_items), len(batch.market_observations), len(result.batch.documents), alerts_written, outcomes_written)
+
+    def _apply_halt_status(self, observations, halts, watermarks, stale, now):  # type: ignore[no-untyped-def]
+        halt_covered = any(family is SourceFamily.TRADING_HALTS for family, _ in watermarks)
+        if not halt_covered:
+            return tuple(observations)
+        halt_current = halt_covered and SourceFamily.TRADING_HALTS.value not in stale
+        latest = {}
+        for halt in halts:
+            if halt.halt_at <= now and (halt.ticker not in latest or halt.halt_at > latest[halt.ticker].halt_at):
+                latest[halt.ticker] = halt
+        output = []
+        for observation in observations:
+            flags = set(observation.missing_flags)
+            if not halt_current:
+                flags.add("MISSING_HALT_STATUS")
+                output.append(replace(observation, halt_status=None, missing_flags=tuple(sorted(flags))))
+                continue
+            halt = latest.get(observation.ticker)
+            status = "not_halted"
+            if halt is not None and (halt.resumption_trade_at is None or halt.resumption_trade_at > now):
+                status = "halted"
+            flags.discard("MISSING_HALT_STATUS")
+            output.append(replace(observation, halt_status=status, missing_flags=tuple(sorted(flags))))
+        return tuple(output)
 
     def _features(self, observations, now: datetime, stale: tuple[str, ...]):  # type: ignore[no-untyped-def]
         output = {}

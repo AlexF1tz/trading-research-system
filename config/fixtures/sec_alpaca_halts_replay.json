@@ -1,0 +1,31 @@
+{
+  "cycles": [{
+    "provider": "sec-alpaca-halts-replay-fixture",
+    "raw_items": [{
+      "source_id": "halt-rss-1", "source_family": "trading_halts",
+      "source_url": "https://www.nasdaqtrader.com/rss.aspx?feed=tradehalts",
+      "source_timestamp": "2026-07-17T13:40:00Z", "first_seen_at": "2026-07-17T13:40:02Z",
+      "payload": {"rss_xml": "fixture"}
+    }],
+    "market_observations": [{
+      "observation_id": "halt-market-1", "security_id": "SEC-CIK-0000320193", "ticker": "AAPL",
+      "source_url": "https://data.alpaca.markets/v2/stocks/snapshots?symbols=AAPL&feed=iex",
+      "source_timestamp": "2026-07-17T13:40:00Z", "first_seen_at": "2026-07-17T13:40:02Z",
+      "feed": "alpaca_iex", "bar_complete": true, "close": 210.5, "volume": 12345,
+      "bid": 210.49, "ask": 210.51, "consolidated_coverage": false, "halt_status": null,
+      "free_float": null, "missing_flags": ["MISSING_HALT_STATUS", "MISSING_FLOAT", "NON_CONSOLIDATED_COVERAGE"]
+    }],
+    "catalyst_documents": [],
+    "halt_observations": [{
+      "halt_id": "halt-aapl-1", "ticker": "AAPL", "reason_code": "T1",
+      "halt_at": "2026-07-17T13:35:00Z", "resumption_quote_at": null, "resumption_trade_at": null,
+      "source_url": "https://www.nasdaqtrader.com/rss.aspx?feed=tradehalts",
+      "source_timestamp": "2026-07-17T13:35:00Z", "provider_received_at": "2026-07-17T13:40:02Z",
+      "first_seen_at": "2026-07-17T13:40:02Z"
+    }],
+    "source_watermarks": [
+      {"source_family": "market_data", "timestamp": "2026-07-17T13:40:00Z"},
+      {"source_family": "trading_halts", "timestamp": "2026-07-17T13:40:02Z"}
+    ]
+  }]
+}

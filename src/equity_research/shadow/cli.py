@@ -10,7 +10,7 @@ from pathlib import Path
 from .monitor import MonitorConfig, ShadowMonitor
 from .provider import (
     AlpacaLiveMarketProvider, CompositeShadowProvider, EndpointPolicy,
-    ReplayShadowProvider, SecEdgarProvider,
+    NasdaqHaltProvider, ReplayShadowProvider, SecEdgarProvider,
 )
 from .storage import ImmutableStore
 from .synthetic import SyntheticShadowProvider
@@ -27,7 +27,7 @@ def main() -> None:
         provider = SyntheticShadowProvider()
     elif mode == "replay":
         provider = ReplayShadowProvider(Path(value["replay_path"]), loop=bool(value.get("replay_loop", False)))
-    elif mode in {"sec", "sec_alpaca"}:
+    elif mode in {"sec", "sec_alpaca", "sec_alpaca_halts"}:
         sec_provider = SecEdgarProvider(
             dict(value.get("cik_to_ticker", {})), value.get("sec_user_agent"),
             state_path=Path(value["sec_state_path"]) if value.get("sec_state_path") else None,
@@ -43,7 +43,13 @@ def main() -> None:
                 feed=str(value.get("alpaca_feed", "iex")),
                 delayed_seconds=int(value.get("alpaca_delayed_seconds", 0)),
             )
-            provider = CompositeShadowProvider((sec_provider, market_provider))
+            providers = [sec_provider, market_provider]
+            if mode == "sec_alpaca_halts":
+                providers.append(NasdaqHaltProvider(
+                    state_path=Path(value["halt_state_path"]) if value.get("halt_state_path") else None,
+                    minimum_request_interval_seconds=float(value.get("halt_minimum_request_interval_seconds", 60.0)),
+                ))
+            provider = CompositeShadowProvider(tuple(providers))
     else:
         raise SystemExit("Only synthetic and cache/replay modes are enabled until approved live endpoint adapters are configured")
     monitor = ShadowMonitor(

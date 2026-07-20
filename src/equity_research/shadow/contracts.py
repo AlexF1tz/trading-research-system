@@ -52,6 +52,7 @@ class MonitorMode(str, Enum):
 class SourceFamily(str, Enum):
     MARKET_DATA = "market_data"
     SEC = "sec"
+    TRADING_HALTS = "trading_halts"
     APPROVED_NEWS = "approved_news"
 
 
@@ -141,6 +142,31 @@ class ShadowInputBatch:
     market_observations: tuple[MarketObservation, ...]
     catalyst_batch: SourceBatch
     source_watermarks: tuple[tuple[SourceFamily, datetime], ...]
+    halt_observations: tuple["HaltObservation", ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class HaltObservation:
+    halt_id: str
+    ticker: str
+    reason_code: str
+    halt_at: datetime
+    resumption_quote_at: datetime | None
+    resumption_trade_at: datetime | None
+    source_url: str
+    source_timestamp: datetime
+    provider_received_at: datetime
+    first_seen_at: datetime
+    processing_timestamp: datetime
+
+    def to_dict(self) -> dict[str, object]:
+        result = asdict(self)
+        for name in ("halt_at", "source_timestamp", "provider_received_at", "first_seen_at", "processing_timestamp"):
+            result[name] = utc_text(getattr(self, name))
+        for name in ("resumption_quote_at", "resumption_trade_at"):
+            value = getattr(self, name)
+            result[name] = utc_text(value) if value else None
+        return result
 
 
 @dataclass(frozen=True, slots=True)

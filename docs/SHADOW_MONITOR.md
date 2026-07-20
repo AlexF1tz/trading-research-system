@@ -18,6 +18,8 @@ SEC submissions responses are retained as immutable raw records. Relevant access
 
 The optional `sec_alpaca` mode composes SEC with a GET-only Alpaca snapshots provider. IEX is explicitly non-consolidated; SIP is marked consolidated only when configured and entitled. Quotes, halt status, float, and relative-volume history remain explicit missing flags when unavailable. Market observations are joined to same-cycle SEC events by normalized ticker, and the alert preserves the first observed price while later 5/15/30/60-minute outcomes remain append-only and excluded from training.
 
+The `sec_alpaca_halts` mode adds the official Nasdaq Trader RSS feed. Polling is limited to once per minute. Raw XML and normalized halt reason, halt time, quote-resumption time, trade-resumption time, first-seen time, and processing time are preserved. Halt records use deterministic IDs and an on-disk seen registry; normalized writes remain immutable across restarts. A current feed supplies `halted` or `not_halted`; a stale feed never silently supplies either state.
+
 ## Git Bash
 
 ```bash

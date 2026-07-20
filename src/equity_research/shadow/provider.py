@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 import os
 import time
+import xml.etree.ElementTree as ET
 from urllib.request import Request, urlopen
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 from urllib.parse import urlencode, urlparse
+from zoneinfo import ZoneInfo
 
 from equity_research.catalyst_intelligence.contracts import (
     NumericalDetail,
@@ -21,6 +23,7 @@ from equity_research.catalyst_intelligence.contracts import (
 
 from .contracts import (
     MarketObservation,
+    HaltObservation,
     MonitorMode,
     RawSourceItem,
     ShadowInputBatch,
@@ -54,6 +57,8 @@ class EndpointPolicy:
             raise ValueError(f"unapproved market-data endpoint: {url}")
         if family is SourceFamily.SEC and not (host == "sec.gov" or host.endswith(".sec.gov")):
             raise ValueError(f"unapproved SEC endpoint: {url}")
+        if family is SourceFamily.TRADING_HALTS and not (host == "nasdaqtrader.com" or host.endswith(".nasdaqtrader.com")):
+            raise ValueError(f"unapproved trading-halt endpoint: {url}")
         if family is SourceFamily.APPROVED_NEWS and not any(
             host == domain or host.endswith(f".{domain}")
             for domain in self.approved_news_domains
@@ -278,7 +283,100 @@ class CompositeShadowProvider:
             tuple(item for batch in batches for item in batch.raw_items),
             tuple(item for batch in batches for item in batch.market_observations), catalysts,
             tuple(item for batch in batches for item in batch.source_watermarks),
+            tuple(item for batch in batches for item in batch.halt_observations),
         )
+
+
+class NasdaqHaltProvider:
+    """Read-only official Nasdaq Trader RSS halt collector."""
+
+    FEED_URL = "https://www.nasdaqtrader.com/rss.aspx?feed=tradehalts"
+
+    def __init__(self, *, opener=urlopen, state_path: Path | None = None,
+                 minimum_request_interval_seconds: float = 60.0,
+                 sleeper=time.sleep) -> None:  # type: ignore[no-untyped-def]
+        if minimum_request_interval_seconds < 60:
+            raise ValueError("Nasdaq halt feed must not be polled more than once per minute")
+        self._opener = opener
+        self._state_path = state_path
+        self._minimum_interval = minimum_request_interval_seconds
+        self._sleeper = sleeper
+        self._last_request_monotonic: float | None = None
+        self._seen = self._load_seen()
+
+    def _load_seen(self) -> set[str]:
+        if self._state_path is None or not self._state_path.exists():
+            return set()
+        try:
+            payload = json.loads(self._state_path.read_text(encoding="utf-8"))
+            return {str(value) for value in payload.get("halt_ids", [])}
+        except (OSError, ValueError, AttributeError) as exc:
+            raise ValueError("Nasdaq halt state file is invalid") from exc
+
+    def _save_seen(self) -> None:
+        if self._state_path is None:
+            return
+        self._state_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self._state_path.with_suffix(self._state_path.suffix + ".tmp")
+        temporary.write_text(json.dumps({"halt_ids": sorted(self._seen)}, indent=2) + "\n", encoding="utf-8")
+        temporary.replace(self._state_path)
+
+    def poll(self, processing_time: datetime) -> ShadowInputBatch:
+        if self._last_request_monotonic is not None:
+            delay = self._minimum_interval - (time.monotonic() - self._last_request_monotonic)
+            if delay > 0:
+                self._sleeper(delay)
+        self._last_request_monotonic = time.monotonic()
+        try:
+            with self._opener(Request(self.FEED_URL, headers={"Accept": "application/rss+xml", "User-Agent": "equity-research-system/read-only-shadow"}), timeout=30) as response:
+                xml_text = response.read().decode("utf-8")
+            root = ET.fromstring(xml_text)
+        except (OSError, UnicodeError, ET.ParseError) as exc:
+            raise TransientSourceError("Nasdaq trading-halt RSS request failed") from exc
+        observations: list[HaltObservation] = []
+        for item in root.iter():
+            if _local_name(item.tag) != "item":
+                continue
+            fields = {_local_name(child.tag).lower(): (child.text or "").strip() for child in item}
+            ticker = fields.get("issuesymbol", "").upper()
+            halt_date, halt_time = fields.get("haltdate", ""), fields.get("halttime", "")
+            if not ticker or not halt_date or not halt_time:
+                continue
+            halt_at = _nasdaq_eastern_timestamp(halt_date, halt_time)
+            reason = fields.get("reasoncode", "UNKNOWN") or "UNKNOWN"
+            halt_id = canonical_hash([ticker, halt_at.isoformat(), reason])
+            quote_at = _optional_nasdaq_timestamp(fields.get("resumptiondate", ""), fields.get("resumptionquotetime", ""))
+            trade_at = _optional_nasdaq_timestamp(fields.get("resumptiondate", ""), fields.get("resumptiontradetime", ""))
+            self._seen.add(halt_id)
+            observations.append(HaltObservation(
+                halt_id, ticker, reason, halt_at, quote_at, trade_at, self.FEED_URL,
+                max((value for value in (halt_at, quote_at, trade_at) if value is not None), default=halt_at),
+                processing_time, processing_time, processing_time,
+            ))
+        self._save_seen()
+        raw = RawSourceItem(
+            source_id="nasdaq-trading-halts-rss", source_family=SourceFamily.TRADING_HALTS,
+            source_url=self.FEED_URL, source_timestamp=processing_time, first_seen_at=processing_time,
+            processing_timestamp=processing_time, payload={"rss_xml": xml_text},
+            license_class="nasdaq_trader_halt_rss_terms_apply", provider_received_at=processing_time,
+        )
+        empty = SourceBatch("nasdaq_trader", "trading_halts_rss", processing_time, ())
+        return ShadowInputBatch("nasdaq_trader", MonitorMode.LIVE, processing_time, (raw,), (), empty,
+                                ((SourceFamily.TRADING_HALTS, processing_time),), tuple(observations))
+
+
+def _local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1].split(":")[-1]
+
+
+def _nasdaq_eastern_timestamp(date_text: str, time_text: str) -> datetime:
+    parsed_date = datetime.strptime(date_text, "%m/%d/%Y").date()
+    parsed_time = datetime.strptime(time_text.split(".")[0], "%H:%M:%S").time()
+    return datetime.combine(parsed_date, parsed_time, ZoneInfo("America/New_York")).astimezone(UTC)
+
+
+def _optional_nasdaq_timestamp(date_text: str, time_text: str) -> datetime | None:
+    return _nasdaq_eastern_timestamp(date_text, time_text) if date_text and time_text else None
 
 
 def _dt(value: str) -> datetime:
@@ -337,7 +435,19 @@ def batch_from_dict(
         (SourceFamily(str(item["source_family"])), _dt(str(item["timestamp"])))
         for item in value.get("source_watermarks", [])  # type: ignore[union-attr]
     )
-    return ShadowInputBatch(str(value.get("provider", "replay")), mode, processing_time, raw_items, market, batch, watermarks)
+    halts = tuple(
+        HaltObservation(
+            halt_id=str(item["halt_id"]), ticker=str(item["ticker"]), reason_code=str(item["reason_code"]),
+            halt_at=_dt(str(item["halt_at"])),
+            resumption_quote_at=_dt(str(item["resumption_quote_at"])) if item.get("resumption_quote_at") else None,
+            resumption_trade_at=_dt(str(item["resumption_trade_at"])) if item.get("resumption_trade_at") else None,
+            source_url=str(item["source_url"]), source_timestamp=_dt(str(item["source_timestamp"])),
+            provider_received_at=_dt(str(item.get("provider_received_at", processing_time.isoformat()))),
+            first_seen_at=_dt(str(item.get("first_seen_at", processing_time.isoformat()))),
+            processing_timestamp=processing_time,
+        ) for item in value.get("halt_observations", [])  # type: ignore[union-attr]
+    )
+    return ShadowInputBatch(str(value.get("provider", "replay")), mode, processing_time, raw_items, market, batch, watermarks, halts)
 
 
 def _document_from_dict(item: dict[str, object], processing_time: datetime) -> SourceDocument:
