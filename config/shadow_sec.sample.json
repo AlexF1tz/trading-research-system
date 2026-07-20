@@ -4,6 +4,8 @@
   "prediction_root": "predictions/shadow",
   "sec_user_agent": "University Research contact@example.edu",
   "cik_to_ticker": {"0000320193": "AAPL"},
+  "sec_state_path": "data/shadow/sec_seen.json",
+  "sec_minimum_request_interval_seconds": 0.11,
   "approved_news_domains": [],
   "monitor": {"poll_interval_seconds": 60.0, "stale_after_seconds": 180.0}
 }

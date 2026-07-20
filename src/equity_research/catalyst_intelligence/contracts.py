@@ -112,6 +112,7 @@ class SourceDocument:
     expected_catalyst_date: date | None = None
     related_primary_document_id: str | None = None
     structured_numerical_details: tuple[NumericalDetail, ...] = ()
+    accepted_at: datetime | None = None
 
     @property
     def source_tier(self) -> SourceTier:
@@ -188,4 +189,3 @@ class CatalystEvent:
             "classification_evidence": list(self.classification_evidence),
             "classification_version": self.classification_version,
         }
-

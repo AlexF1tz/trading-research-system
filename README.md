@@ -8,6 +8,27 @@ Architecture and staged implementation planning are complete. Stage 2 now uses a
 
 Run the offline Stage 3 operational rehearsal with `live-monitor --config config/shadow_monitor.sample.json`; it continues until Ctrl+C. See [Stage 3 shadow monitor](docs/SHADOW_MONITOR.md).
 
+### SEC-first shadow monitor
+
+The SEC provider is read-only and uses EDGAR submissions only. Set an identifying contact in a copied config (do not put credentials in the repository), then run:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+live-monitor --config config\shadow_sec.sample.json
+```
+
+Or without changing `PATH`:
+
+```powershell
+.\.venv\Scripts\python.exe -m equity_research.shadow.cli --config config\shadow_sec.sample.json --max-cycles 2
+```
+
+SEC accession state is persisted at `data/shadow/sec_seen.json` so restarts do not re-alert old filings. For offline replay, supply a captured cache using `config\shadow_sec_replay.sample.json`:
+
+```powershell
+.\.venv\Scripts\python.exe -m equity_research.shadow.cli --config config\shadow_sec_replay.sample.json --max-cycles 1
+```
+
 The initial deliverables are:
 
 - [Architecture](docs/ARCHITECTURE.md)

@@ -14,6 +14,8 @@ No live network adapter is enabled by default. A future live adapter must use on
 
 To run the SEC-first monitor, copy `config/shadow_sec.sample.json`, replace the placeholder contact address, set a small CIK map, and run `live-monitor --config config/shadow_sec.sample.json`. SEC automated access requires an identifying User-Agent; no API key is used.
 
+SEC submissions responses are retained as immutable raw records. Relevant accession numbers are stored in a local append-only state checkpoint for restart-safe deduplication. Requests are paced at no more than ten per second by default. The submissions endpoint exposes filing/acceptance metadata; the provider does not scrape filing text.
+
 ## Git Bash
 
 ```bash

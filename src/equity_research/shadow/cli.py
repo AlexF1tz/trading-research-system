@@ -24,7 +24,11 @@ def main() -> None:
     elif mode == "replay":
         provider = ReplayShadowProvider(Path(value["replay_path"]), loop=bool(value.get("replay_loop", False)))
     elif mode == "sec":
-        provider = SecEdgarProvider(dict(value.get("cik_to_ticker", {})), value.get("sec_user_agent"))
+        provider = SecEdgarProvider(
+            dict(value.get("cik_to_ticker", {})), value.get("sec_user_agent"),
+            state_path=Path(value["sec_state_path"]) if value.get("sec_state_path") else None,
+            minimum_request_interval_seconds=float(value.get("sec_minimum_request_interval_seconds", 0.11)),
+        )
     else:
         raise SystemExit("Only synthetic and cache/replay modes are enabled until approved live endpoint adapters are configured")
     monitor = ShadowMonitor(

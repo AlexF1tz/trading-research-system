@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from urllib.request import Request, urlopen
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Protocol
 from urllib.parse import urlparse
@@ -93,18 +94,48 @@ class SecEdgarProvider:
     """Read-only SEC submissions poller; no API key or filing-text scraping."""
 
     def __init__(self, cik_to_ticker: dict[str, str], user_agent: str | None = None,
-                 opener=urlopen) -> None:  # type: ignore[no-untyped-def]
+                 opener=urlopen, *, state_path: Path | None = None,
+                 minimum_request_interval_seconds: float = 0.11,
+                 sleeper=time.sleep) -> None:  # type: ignore[no-untyped-def]
         self._mapping = {str(cik).zfill(10): ticker.upper() for cik, ticker in cik_to_ticker.items()}
         self._user_agent = (user_agent or os.environ.get("SEC_USER_AGENT", "")).strip()
         if not self._user_agent:
             raise ValueError("SEC_USER_AGENT is required for EDGAR automated access")
         self._opener = opener
-        self._seen: set[str] = set()
+        self._state_path = state_path
+        self._minimum_interval = minimum_request_interval_seconds
+        if self._minimum_interval < 0.1:
+            raise ValueError("SEC request interval must be at least 0.1 seconds")
+        self._sleeper = sleeper
+        self._last_request_monotonic: float | None = None
+        self._seen: set[str] = self._load_seen()
+
+    def _load_seen(self) -> set[str]:
+        if self._state_path is None or not self._state_path.exists():
+            return set()
+        try:
+            value = json.loads(self._state_path.read_text(encoding="utf-8"))
+            return {str(item) for item in value.get("accessions", [])}
+        except (OSError, ValueError, AttributeError) as exc:
+            raise ValueError("SEC state file is invalid") from exc
+
+    def _save_seen(self) -> None:
+        if self._state_path is None:
+            return
+        self._state_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self._state_path.with_suffix(self._state_path.suffix + ".tmp")
+        temporary.write_text(json.dumps({"accessions": sorted(self._seen)}, indent=2) + "\n", encoding="utf-8")
+        temporary.replace(self._state_path)
 
     def poll(self, processing_time: datetime) -> ShadowInputBatch:
         raw_items: list[RawSourceItem] = []
         documents: list[SourceDocument] = []
         for cik, ticker in self._mapping.items():
+            if self._last_request_monotonic is not None:
+                delay = self._minimum_interval - (time.monotonic() - self._last_request_monotonic)
+                if delay > 0:
+                    self._sleeper(delay)
+            self._last_request_monotonic = time.monotonic()
             url = f"https://data.sec.gov/submissions/CIK{cik}.json"
             request = Request(url, headers={"User-Agent": self._user_agent, "Accept": "application/json"})
             try:
@@ -113,18 +144,26 @@ class SecEdgarProvider:
             except (OSError, ValueError) as exc:
                 raise TransientSourceError(f"SEC EDGAR request failed for {cik}") from exc
             received = processing_time
+            raw_items.append(RawSourceItem(
+                source_id=f"submissions-{cik}", source_family=SourceFamily.SEC, source_url=url,
+                source_timestamp=received, first_seen_at=received, processing_timestamp=received,
+                payload=payload, license_class="sec_public_edgar", provider_received_at=received,
+            ))
             recent = payload.get("filings", {}).get("recent", {})
             fields = list(recent.get("accessionNumber", []))
+            acceptance_values = list(recent.get("acceptanceDateTime", [""] * len(fields)))
             for index, accession in enumerate(fields):
                 if accession in self._seen:
                     continue
                 filing_date = str(recent.get("filingDate", [])[index])
+                accepted_text = str(acceptance_values[index] or "")
                 form = str(recent.get("form", [])[index])
                 if form not in {"8-K", "S-1", "S-3", "424B3", "424B5", "10-Q", "10-K", "6-K", "4", "13D", "13G", "DEF 14A"}:
                     continue
                 accession_compact = accession.replace("-", "")
                 source_url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{accession_compact}/{accession}-index.html"
                 published = datetime.fromisoformat(filing_date).replace(tzinfo=received.tzinfo)
+                accepted = _dt(accepted_text) if accepted_text else None
                 document_id = f"sec-{accession}"
                 self._seen.add(accession)
                 raw_items.append(RawSourceItem(
@@ -140,13 +179,17 @@ class SecEdgarProvider:
                     published_at=published, first_public_at=published, first_seen_at=received,
                     ingested_at=received, available_at=received, source_timestamp_verified=False,
                     source_record_id=accession, form_type=form, accession_number=accession,
+                    accepted_at=accepted,
                 ))
+        self._save_seen()
         batch = SourceBatch("sec_edgar", "sec_submissions_recent", processing_time, tuple(documents))
         return ShadowInputBatch("sec_edgar", MonitorMode.LIVE, processing_time, tuple(raw_items), (), batch,
                                 ((SourceFamily.SEC, processing_time),))
 
 
 def _dt(value: str) -> datetime:
+    if len(value) == 14 and value.isdigit():
+        return datetime.strptime(value, "%Y%m%d%H%M%S").replace(tzinfo=UTC)
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
@@ -220,4 +263,5 @@ def _document_from_dict(item: dict[str, object], processing_time: datetime) -> S
         accession_number=str(item["accession_number"]) if item.get("accession_number") else None,
         expected_catalyst_date=date.fromisoformat(str(item["expected_catalyst_date"])) if item.get("expected_catalyst_date") else None,
         structured_numerical_details=tuple(NumericalDetail(**detail) for detail in item.get("structured_numerical_details", [])),  # type: ignore[arg-type]
+        accepted_at=_dt(str(item["accepted_at"])) if item.get("accepted_at") else None,
     )

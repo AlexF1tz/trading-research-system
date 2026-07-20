@@ -138,6 +138,35 @@ def test_sec_provider_normalizes_and_deduplicates_filings():
     second = provider.poll(now)
     assert first.mode is MonitorMode.LIVE
     assert len(first.catalyst_batch.documents) == 2
-    assert len(first.raw_items) == 2
+    assert len(first.raw_items) == 3  # full submissions response plus two new filings
     assert second.catalyst_batch.documents == ()
     assert first.raw_items[0].provider_received_at == now
+
+
+def test_sec_provider_persists_dedup_state_and_acceptance_time(tmp_path):
+    payload = {"filings": {"recent": {
+        "accessionNumber": ["0000320193-26-000003"], "filingDate": ["2026-07-17"],
+        "acceptanceDateTime": ["20260717133000"], "form": ["8-K"]
+    }}}
+    path = tmp_path / "sec_seen.json"
+    opener = lambda *args, **kwargs: FakeResponse(payload)
+    now = datetime(2026, 7, 17, 13, 40, tzinfo=UTC)
+    first = SecEdgarProvider({"320193": "AAPL"}, "Research contact@example.edu", opener, state_path=path)
+    batch = first.poll(now)
+    assert batch.catalyst_batch.documents[0].accepted_at == datetime(2026, 7, 17, 13, 30, tzinfo=UTC)
+    assert json.loads(path.read_text())["accessions"] == ["0000320193-26-000003"]
+    restarted = SecEdgarProvider({"320193": "AAPL"}, "Research contact@example.edu", opener, state_path=path)
+    assert restarted.poll(now).catalyst_batch.documents == ()
+    assert batch.raw_items[0].payload["filings"] == payload["filings"]
+
+
+def test_sec_provider_enforces_request_pacing():
+    payload = {"filings": {"recent": {"accessionNumber": [], "filingDate": [], "form": []}}}
+    delays = []
+    provider = SecEdgarProvider(
+        {"1": "AAA", "2": "BBB"}, "Research contact@example.edu",
+        lambda *args, **kwargs: FakeResponse(payload), minimum_request_interval_seconds=0.1,
+        sleeper=delays.append,
+    )
+    provider.poll(datetime(2026, 7, 17, 13, 40, tzinfo=UTC))
+    assert delays and delays[0] >= 0

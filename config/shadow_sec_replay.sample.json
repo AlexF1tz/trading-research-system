@@ -1,0 +1,8 @@
+{
+  "mode": "replay",
+  "data_root": "data/shadow-replay",
+  "prediction_root": "predictions/shadow-replay",
+  "replay_path": "data/replay/sec_cycles.json",
+  "replay_loop": false,
+  "monitor": {"poll_interval_seconds": 60.0, "stale_after_seconds": 180.0}
+}
