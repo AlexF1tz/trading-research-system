@@ -2,7 +2,7 @@
   "mode": "sec_alpaca",
   "data_root": "data/shadow-live",
   "prediction_root": "predictions/shadow-live",
-  "sec_user_agent": "University Research contact@example.edu",
+  "sec_user_agent": "University Research Alexander Fitzpatrick fitzpatrickalexander90@gmail.com",
   "cik_to_ticker": {"0000320193": "AAPL", "0000789019": "MSFT"},
   "sec_state_path": "data/shadow-live/sec_seen.json",
   "sec_minimum_request_interval_seconds": 0.11,
