@@ -76,6 +76,9 @@ class ShadowMonitor:
             self.policy.validate(SourceFamily.TRADING_HALTS, halt.source_url, batch.mode)
             if not self.store.has_normalized("trading_halts", halt.halt_id):
                 self.store.write_normalized("trading_halts", halt.halt_id, halt.to_dict())
+        for manifest in batch.sec_bootstrap_manifests:
+            if not self.store.has_normalized("sec_bootstrap_manifests", manifest.manifest_id):
+                self.store.write_normalized("sec_bootstrap_manifests", manifest.manifest_id, manifest.to_dict())
         market_observations = self._apply_halt_status(batch.market_observations, batch.halt_observations, batch.source_watermarks, stale, now)
         for observation in market_observations:
             self.policy.validate(SourceFamily.MARKET_DATA, observation.source_url, batch.mode)
@@ -174,6 +177,8 @@ class ShadowMonitor:
     def _outcomes(self, now: datetime) -> int:
         written = 0
         for alert in self.store.alert_records():
+            if self.store.is_alert_invalid(alert):
+                continue
             start = datetime.fromisoformat(str(alert["alert_as_of"]).replace("Z", "+00:00"))
             records = self.store.market_records(str(alert["security_id"]))
             for minutes in self.config.outcome_intervals_minutes:

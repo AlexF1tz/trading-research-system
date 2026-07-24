@@ -143,6 +143,23 @@ class ShadowInputBatch:
     catalyst_batch: SourceBatch
     source_watermarks: tuple[tuple[SourceFamily, datetime], ...]
     halt_observations: tuple["HaltObservation", ...] = ()
+    sec_bootstrap_manifests: tuple["SecBootstrapManifest", ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class SecBootstrapManifest:
+    manifest_id: str
+    cik: str
+    ticker: str
+    seeded_accession_count: int
+    initialized_at: datetime
+    source_url: str
+    state_schema_version: int = 2
+
+    def to_dict(self) -> dict[str, object]:
+        result = asdict(self)
+        result["initialized_at"] = utc_text(self.initialized_at)
+        return result
 
 
 @dataclass(frozen=True, slots=True)

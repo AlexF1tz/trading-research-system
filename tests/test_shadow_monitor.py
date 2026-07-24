@@ -70,6 +70,21 @@ def test_outcome_is_append_only_and_never_training_data(tmp_path):
     assert outcome["horizon_minutes"] == 1
 
 
+def test_invalidated_alert_never_generates_outcomes(tmp_path):
+    subject, store = monitor(tmp_path, outcome_intervals_minutes=(1,))
+    subject.run_cycle()
+    alert = store.alert_records()[0]
+    store.write_run_invalidation("bootstrap-invalid", {
+        "eligible_for_evaluation": False,
+        "invalid_alert_created_at_from": alert["created_at"],
+        "invalid_alert_created_at_to": alert["created_at"],
+        "reason_code": "SEC_BOOTSTRAP_HISTORY_EMITTED_AS_NEW",
+    })
+    heartbeat = subject.run_cycle()
+    assert heartbeat.outcomes_written == 0
+    assert not (tmp_path / "predictions" / "outcomes").exists()
+
+
 def test_endpoint_policy_rejects_trading_and_unapproved_news():
     policy = EndpointPolicy(("example.com",))
     policy.validate(SourceFamily.MARKET_DATA, "https://data.alpaca.markets/v2/stocks/bars", MonitorMode.REPLAY)
@@ -136,20 +151,35 @@ class FakeBytesResponse(FakeResponse):
     def read(self): return self.payload
 
 
-def test_sec_provider_normalizes_and_deduplicates_filings():
+def test_sec_provider_bootstraps_history_then_emits_exactly_one_new_filing(tmp_path):
     payload = {"filings": {"recent": {
         "accessionNumber": ["0000320193-26-000001", "0000320193-26-000002"],
-        "filingDate": ["2026-07-17", "2026-07-17"], "form": ["8-K", "8-K"]
+        "filingDate": ["2026-07-17", "2026-07-17"],
+        "acceptanceDateTime": ["20260717130000", "20260717131000"],
+        "form": ["8-K", "8-K"]
     }}}
-    provider = SecEdgarProvider({"320193": "AAPL"}, "Research contact@example.edu", lambda *args, **kwargs: FakeResponse(payload))
+    path = tmp_path / "sec_seen.json"
+    provider = SecEdgarProvider(
+        {"320193": "AAPL"}, "Research contact@example.edu",
+        lambda *args, **kwargs: FakeResponse(payload), state_path=path,
+    )
     now = datetime(2026, 7, 17, 13, 30, tzinfo=UTC)
     first = provider.poll(now)
     second = provider.poll(now)
     assert first.mode is MonitorMode.LIVE
-    assert len(first.catalyst_batch.documents) == 2
-    assert len(first.raw_items) == 3  # full submissions response plus two new filings
+    assert first.catalyst_batch.documents == ()
+    assert len(first.raw_items) == 1
+    assert first.sec_bootstrap_manifests[0].seeded_accession_count == 2
     assert second.catalyst_batch.documents == ()
     assert first.raw_items[0].provider_received_at == now
+    payload["filings"]["recent"]["accessionNumber"].insert(0, "0000320193-26-000003")
+    payload["filings"]["recent"]["filingDate"].insert(0, "2026-07-17")
+    payload["filings"]["recent"]["acceptanceDateTime"].insert(0, "20260717132500")
+    payload["filings"]["recent"]["form"].insert(0, "8-K")
+    third = provider.poll(now)
+    assert len(third.catalyst_batch.documents) == 1
+    assert third.catalyst_batch.documents[0].accession_number == "0000320193-26-000003"
+    assert third.catalyst_batch.documents[0].first_public_at == datetime(2026, 7, 17, 13, 25, tzinfo=UTC)
 
 
 def test_sec_provider_persists_dedup_state_and_acceptance_time(tmp_path):
@@ -158,15 +188,114 @@ def test_sec_provider_persists_dedup_state_and_acceptance_time(tmp_path):
         "acceptanceDateTime": ["20260717133000"], "form": ["8-K"]
     }}}
     path = tmp_path / "sec_seen.json"
+    path.write_text(json.dumps({
+        "schema_version": 2,
+        "ciks": {"0000320193": {"initialized": True, "accessions": []}},
+    }))
     opener = lambda *args, **kwargs: FakeResponse(payload)
     now = datetime(2026, 7, 17, 13, 40, tzinfo=UTC)
     first = SecEdgarProvider({"320193": "AAPL"}, "Research contact@example.edu", opener, state_path=path)
     batch = first.poll(now)
     assert batch.catalyst_batch.documents[0].accepted_at == datetime(2026, 7, 17, 13, 30, tzinfo=UTC)
-    assert json.loads(path.read_text())["accessions"] == ["0000320193-26-000003"]
+    state = json.loads(path.read_text())
+    assert state["ciks"]["0000320193"]["initialized"] is True
+    assert state["ciks"]["0000320193"]["accessions"] == ["0000320193-26-000003"]
     restarted = SecEdgarProvider({"320193": "AAPL"}, "Research contact@example.edu", opener, state_path=path)
     assert restarted.poll(now).catalyst_batch.documents == ()
     assert batch.raw_items[0].payload["filings"] == payload["filings"]
+
+
+def test_sec_bootstrap_initializes_each_cik_independently(tmp_path):
+    payloads = {
+        "0000000001": {"filings": {"recent": {
+            "accessionNumber": ["0000000001-26-000001"], "filingDate": ["2026-07-17"], "form": ["8-K"]
+        }}},
+        "0000000002": {"filings": {"recent": {
+            "accessionNumber": [], "filingDate": [], "form": []
+        }}},
+    }
+    def opener(request, timeout):
+        cik = request.full_url.split("CIK", 1)[1].split(".", 1)[0]
+        return FakeResponse(payloads[cik])
+    state_path = tmp_path / "state.json"
+    provider = SecEdgarProvider(
+        {"1": "AAA", "2": "BBB"}, "Research contact@example.edu", opener,
+        state_path=state_path, sleeper=lambda _: None,
+    )
+    batch = provider.poll(datetime(2026, 7, 17, 13, 40, tzinfo=UTC))
+    assert batch.catalyst_batch.documents == ()
+    assert {item.cik: item.seeded_accession_count for item in batch.sec_bootstrap_manifests} == {
+        "0000000001": 1, "0000000002": 0,
+    }
+    state = json.loads(state_path.read_text())
+    assert state["ciks"]["0000000002"] == {"initialized": True, "accessions": []}
+
+
+def test_sec_corrupted_state_fails_closed(tmp_path):
+    path = tmp_path / "state.json"
+    path.write_text('{"schema_version": 2, "ciks": {"0000320193": {"accessions": []}}}')
+    with pytest.raises(ValueError, match="SEC state file is invalid"):
+        SecEdgarProvider(
+            {"320193": "AAPL"}, "Research contact@example.edu",
+            lambda *args, **kwargs: FakeResponse({}), state_path=path,
+        )
+
+
+def test_sec_bootstrap_manifest_is_persisted_by_monitor(tmp_path):
+    payload = {"filings": {"recent": {
+        "accessionNumber": ["0000320193-26-000010"], "filingDate": ["2026-07-17"], "form": ["8-K"]
+    }}}
+    provider = SecEdgarProvider(
+        {"320193": "AAPL"}, "Research contact@example.edu",
+        lambda *args, **kwargs: FakeResponse(payload), state_path=tmp_path / "state.json",
+    )
+    subject, store = monitor(tmp_path, provider)
+    heartbeat = subject.run_cycle()
+    manifests = list((store.data_root / "normalized" / "sec_bootstrap_manifests").glob("*.json"))
+    assert len(manifests) == 1
+    assert json.loads(manifests[0].read_text())["seeded_accession_count"] == 1
+    assert heartbeat.alerts_written == 0
+
+
+def test_sec_legacy_state_migrates_by_accession_cik(tmp_path):
+    path = tmp_path / "state.json"
+    path.write_text(json.dumps({"accessions": [
+        "0000320193-26-000001", "0000789019-26-000001",
+    ]}))
+    provider = SecEdgarProvider(
+        {"320193": "AAPL", "789019": "MSFT"}, "Research contact@example.edu",
+        lambda *args, **kwargs: FakeResponse({
+            "filings": {"recent": {"accessionNumber": [], "filingDate": [], "form": []}}
+        }),
+        state_path=path, sleeper=lambda _: None,
+    )
+    provider.poll(datetime(2026, 7, 17, 13, 40, tzinfo=UTC))
+    state = json.loads(path.read_text())
+    assert state["schema_version"] == 2
+    assert state["ciks"]["0000320193"]["initialized"] is True
+    assert state["ciks"]["0000789019"]["initialized"] is True
+    assert state["ciks"]["0000320193"]["accessions"] == [
+        "0000320193-26-000001", "0000789019-26-000001",
+    ]
+    assert state["ciks"]["0000789019"]["accessions"] == [
+        "0000320193-26-000001", "0000789019-26-000001",
+    ]
+
+
+def test_sec_legacy_state_with_filing_agent_accession_migrates_conservatively(tmp_path):
+    path = tmp_path / "state.json"
+    path.write_text(json.dumps({"accessions": ["0001193125-26-000001"]}))
+    provider = SecEdgarProvider(
+        {"320193": "AAPL", "789019": "MSFT"}, "Research contact@example.edu",
+        lambda *args, **kwargs: FakeResponse({
+            "filings": {"recent": {"accessionNumber": [], "filingDate": [], "form": []}}
+        }),
+        state_path=path, sleeper=lambda _: None,
+    )
+    provider.poll(datetime(2026, 7, 17, 13, 40, tzinfo=UTC))
+    state = json.loads(path.read_text())
+    assert state["ciks"]["0000320193"]["accessions"] == ["0001193125-26-000001"]
+    assert state["ciks"]["0000789019"]["accessions"] == ["0001193125-26-000001"]
 
 
 def test_sec_provider_enforces_request_pacing():
@@ -212,7 +341,15 @@ def test_composite_provider_associates_sec_and_market_by_ticker(tmp_path):
         "minuteBar": {"t": "2026-07-17T13:30:00Z", "c": 210.5, "v": 12345},
         "latestQuote": {"t": "2026-07-17T13:30:01Z", "bp": 210.49, "ap": 210.51},
     }}
-    sec = SecEdgarProvider({"320193": "AAPL"}, "Research contact@example.edu", lambda *a, **k: FakeResponse(sec_payload))
+    state = tmp_path / "sec_state.json"
+    state.write_text(json.dumps({
+        "schema_version": 2,
+        "ciks": {"0000320193": {"initialized": True, "accessions": []}},
+    }))
+    sec = SecEdgarProvider(
+        {"320193": "AAPL"}, "Research contact@example.edu",
+        lambda *a, **k: FakeResponse(sec_payload), state_path=state,
+    )
     market = AlpacaLiveMarketProvider({"AAPL": "SEC-CIK-0000320193"}, "key", "secret", opener=lambda *a, **k: FakeResponse(market_payload))
     subject, store = monitor(tmp_path, CompositeShadowProvider((sec, market)))
     subject.run_cycle()

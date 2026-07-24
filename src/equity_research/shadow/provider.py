@@ -26,6 +26,7 @@ from .contracts import (
     HaltObservation,
     MonitorMode,
     RawSourceItem,
+    SecBootstrapManifest,
     ShadowInputBatch,
     SourceFamily,
     canonical_hash,
@@ -114,28 +115,71 @@ class SecEdgarProvider:
             raise ValueError("SEC request interval must be at least 0.1 seconds")
         self._sleeper = sleeper
         self._last_request_monotonic: float | None = None
-        self._seen: set[str] = self._load_seen()
+        self._seen_by_cik, self._initialized_ciks = self._load_state()
 
-    def _load_seen(self) -> set[str]:
+    def _load_state(self) -> tuple[dict[str, set[str]], set[str]]:
         if self._state_path is None or not self._state_path.exists():
-            return set()
+            return {}, set()
         try:
             value = json.loads(self._state_path.read_text(encoding="utf-8"))
-            return {str(item) for item in value.get("accessions", [])}
+            if not isinstance(value, dict):
+                raise ValueError("state root must be an object")
+            if value.get("schema_version") == 2:
+                ciks = value.get("ciks")
+                if not isinstance(ciks, dict):
+                    raise ValueError("version 2 state requires a ciks object")
+                seen_by_cik: dict[str, set[str]] = {}
+                initialized: set[str] = set()
+                for raw_cik, raw_state in ciks.items():
+                    cik = str(raw_cik).zfill(10)
+                    if not isinstance(raw_state, dict) or not isinstance(raw_state.get("initialized"), bool):
+                        raise ValueError("CIK state requires an initialized boolean")
+                    accessions = raw_state.get("accessions")
+                    if not isinstance(accessions, list) or any(not isinstance(item, str) for item in accessions):
+                        raise ValueError("CIK state accessions must be a string list")
+                    seen_by_cik[cik] = set(accessions)
+                    if raw_state["initialized"]:
+                        initialized.add(cik)
+                return seen_by_cik, initialized
+            if set(value) == {"accessions"} and isinstance(value["accessions"], list):
+                if any(not isinstance(item, str) for item in value["accessions"]):
+                    raise ValueError("legacy accessions must be strings")
+                # SEC accession prefixes can identify a filing agent rather than
+                # the issuer CIK. Conservatively copy the global legacy set to
+                # each currently configured CIK so migration cannot replay
+                # history. New CIKs added after version-2 migration remain
+                # independently uninitialized and follow bootstrap behavior.
+                legacy_seen = set(value["accessions"])
+                return (
+                    {cik: set(legacy_seen) for cik in self._mapping},
+                    set(self._mapping),
+                )
+            raise ValueError("unrecognized SEC state schema")
         except (OSError, ValueError, AttributeError) as exc:
             raise ValueError("SEC state file is invalid") from exc
 
-    def _save_seen(self) -> None:
+    def _save_state(self) -> None:
         if self._state_path is None:
             return
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self._state_path.with_suffix(self._state_path.suffix + ".tmp")
-        temporary.write_text(json.dumps({"accessions": sorted(self._seen)}, indent=2) + "\n", encoding="utf-8")
+        payload = {
+            "schema_version": 2,
+            "ciks": {
+                cik: {
+                    "initialized": cik in self._initialized_ciks,
+                    "accessions": sorted(accessions),
+                }
+                for cik, accessions in sorted(self._seen_by_cik.items())
+            },
+        }
+        temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
         temporary.replace(self._state_path)
 
     def poll(self, processing_time: datetime) -> ShadowInputBatch:
         raw_items: list[RawSourceItem] = []
         documents: list[SourceDocument] = []
+        bootstrap_manifests: list[SecBootstrapManifest] = []
         for cik, ticker in self._mapping.items():
             if self._last_request_monotonic is not None:
                 delay = self._minimum_interval - (time.monotonic() - self._last_request_monotonic)
@@ -158,9 +202,23 @@ class SecEdgarProvider:
             recent = payload.get("filings", {}).get("recent", {})
             fields = list(recent.get("accessionNumber", []))
             acceptance_values = list(recent.get("acceptanceDateTime", [""] * len(fields)))
+            if cik not in self._initialized_ciks:
+                self._seen_by_cik[cik] = {str(accession) for accession in fields}
+                self._initialized_ciks.add(cik)
+                bootstrap_manifests.append(SecBootstrapManifest(
+                    manifest_id=canonical_hash(["sec-bootstrap", cik, processing_time.isoformat(), sorted(fields)]),
+                    cik=cik,
+                    ticker=ticker,
+                    seeded_accession_count=len(fields),
+                    initialized_at=processing_time,
+                    source_url=url,
+                ))
+                continue
+            seen = self._seen_by_cik.setdefault(cik, set())
             for index, accession in enumerate(fields):
-                if accession in self._seen:
+                if accession in seen:
                     continue
+                seen.add(accession)
                 filing_date = str(recent.get("filingDate", [])[index])
                 accepted_text = str(acceptance_values[index] or "")
                 form = str(recent.get("form", [])[index])
@@ -170,8 +228,8 @@ class SecEdgarProvider:
                 source_url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{accession_compact}/{accession}-index.html"
                 published = datetime.fromisoformat(filing_date).replace(tzinfo=received.tzinfo)
                 accepted = _dt(accepted_text) if accepted_text else None
+                first_public = accepted or published
                 document_id = f"sec-{accession}"
-                self._seen.add(accession)
                 raw_items.append(RawSourceItem(
                     source_id=accession, source_family=SourceFamily.SEC, source_url=url,
                     source_timestamp=published, first_seen_at=received, processing_timestamp=received,
@@ -182,15 +240,15 @@ class SecEdgarProvider:
                     document_id=document_id, ticker=ticker, issuer_id=cik,
                     title=f"SEC {form} filing {accession}", text=f"SEC filing form {form}; filing date {filing_date}.",
                     source_url=source_url, source_kind=SourceKind.SEC_FILING,
-                    published_at=published, first_public_at=published, first_seen_at=received,
-                    ingested_at=received, available_at=received, source_timestamp_verified=False,
+                    published_at=published, first_public_at=first_public, first_seen_at=received,
+                    ingested_at=received, available_at=max(first_public, received), source_timestamp_verified=accepted is not None,
                     source_record_id=accession, form_type=form, accession_number=accession,
                     accepted_at=accepted,
                 ))
-        self._save_seen()
+        self._save_state()
         batch = SourceBatch("sec_edgar", "sec_submissions_recent", processing_time, tuple(documents))
         return ShadowInputBatch("sec_edgar", MonitorMode.LIVE, processing_time, tuple(raw_items), (), batch,
-                                ((SourceFamily.SEC, processing_time),))
+                                ((SourceFamily.SEC, processing_time),), (), tuple(bootstrap_manifests))
 
 
 class AlpacaLiveMarketProvider:
@@ -284,6 +342,7 @@ class CompositeShadowProvider:
             tuple(item for batch in batches for item in batch.market_observations), catalysts,
             tuple(item for batch in batches for item in batch.source_watermarks),
             tuple(item for batch in batches for item in batch.halt_observations),
+            tuple(item for batch in batches for item in batch.sec_bootstrap_manifests),
         )
 
 
@@ -447,7 +506,18 @@ def batch_from_dict(
             processing_timestamp=processing_time,
         ) for item in value.get("halt_observations", [])  # type: ignore[union-attr]
     )
-    return ShadowInputBatch(str(value.get("provider", "replay")), mode, processing_time, raw_items, market, batch, watermarks, halts)
+    manifests = tuple(
+        SecBootstrapManifest(
+            manifest_id=str(item["manifest_id"]), cik=str(item["cik"]), ticker=str(item["ticker"]),
+            seeded_accession_count=int(item["seeded_accession_count"]),
+            initialized_at=_dt(str(item["initialized_at"])), source_url=str(item["source_url"]),
+            state_schema_version=int(item.get("state_schema_version", 2)),
+        ) for item in value.get("sec_bootstrap_manifests", [])  # type: ignore[union-attr]
+    )
+    return ShadowInputBatch(
+        str(value.get("provider", "replay")), mode, processing_time, raw_items, market,
+        batch, watermarks, halts, manifests
+    )
 
 
 def _document_from_dict(item: dict[str, object], processing_time: datetime) -> SourceDocument:

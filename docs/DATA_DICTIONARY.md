@@ -139,6 +139,8 @@ The full contract is in [PREDICTION_SCHEMA.md](PREDICTION_SCHEMA.md). It is appe
 - `heartbeat`: append-only source-health record with cycle, reconnect attempt, stale sources, counts, mandatory modelling block, and execution disabled.
 - `shadow_outcome`: append-only 5/15/30/60-minute horizon evaluation referencing the alert ID; records horizon minutes, return/MFE/MAE or insufficient coverage and always has `used_for_training=false`.
 - `halt_observation`: deterministic halt ID, ticker, Nasdaq reason code, UTC halt/quote-resumption/trade-resumption timestamps, source URL, source/provider-received/first-seen/processing timestamps, and raw RSS lineage.
+- `sec_bootstrap_manifest`: per-CIK initialization record containing ticker, source URL, initialization time, state schema version, and the number of historical accessions seeded without emitting catalysts.
+- `run_invalidation`: immutable evaluation exclusion with reason code and explicit alert IDs or alert-creation time bounds. Invalidated alerts never produce new outcomes; previously written artifacts remain preserved and ineligible.
 
 ## `prediction_outcome`
 

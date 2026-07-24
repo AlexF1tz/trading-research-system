@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 from .contracts import canonical_hash, json_safe
@@ -42,6 +43,35 @@ class ImmutableStore:
 
     def write_heartbeat(self, heartbeat_id: str, value: object) -> bool:
         return self._write(self.prediction_root / "heartbeats" / f"{heartbeat_id}.json", value)
+
+    def write_run_invalidation(self, invalidation_id: str, value: object) -> bool:
+        return self._write(
+            self.prediction_root / "run_invalidations" / f"{invalidation_id}.json",
+            value,
+        )
+
+    def is_alert_invalid(self, alert: dict[str, object]) -> bool:
+        root = self.prediction_root / "run_invalidations"
+        if not root.exists():
+            return False
+        alert_id = str(alert.get("alert_id", ""))
+        created_text = str(alert.get("created_at", ""))
+        try:
+            created_at = datetime.fromisoformat(created_text.replace("Z", "+00:00"))
+        except ValueError:
+            raise RuntimeError(f"invalid alert created_at: {created_text!r}")
+        for path in root.glob("*.json"):
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+            if alert_id in manifest.get("invalid_alert_ids", []):
+                return True
+            start_text = manifest.get("invalid_alert_created_at_from")
+            end_text = manifest.get("invalid_alert_created_at_to")
+            if start_text and end_text:
+                start = datetime.fromisoformat(str(start_text).replace("Z", "+00:00"))
+                end = datetime.fromisoformat(str(end_text).replace("Z", "+00:00"))
+                if start <= created_at <= end:
+                    return True
+        return False
 
     def alert_records(self) -> list[dict[str, object]]:
         root = self.prediction_root / "alerts"
